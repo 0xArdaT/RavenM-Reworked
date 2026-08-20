@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RavenM Reworked — EA38 Compatible Multiplayer Mod for Ravenfield</title>
+<meta name="description" content="RavenM Reworked: an EA38-compatible, bug-fixed continuation of RavenM for Ravenfield, with integrated voice chat and performance improvements.">
+<style>
+  /* ============ RESET ============ */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto;}
+    *,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important;}
+  }
+  img,svg{display:block;max-width:100%;}
+  a{color:inherit;text-decoration:none;}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+  ul{list-style:none;}
+
+  /* ============ TOKENS ============ */
+  :root{
+    --bg-void:#0a0b0d;
+    --bg-panel:#131519;
+    --bg-panel-raised:#181b21;
+    --bg-panel-hi:#1d2027;
+    --line:#24272e;
+    --line-bright:#383d46;
+    --text-primary:#e9eaec;
+    --text-muted:#9a9fa8;
+    --text-dim:#5c6169;
+    --crimson:#d6453f;
+    --crimson-soft:#7a2a27;
+    --crimson-glow:rgba(214,69,63,0.35);
+    --amber:#e0a458;
+    --amber-soft:rgba(224,164,88,0.12);
+    --green:#5fa777;
+    --radius:3px;
+    --font-display:"Bahnschrift", "Arial Narrow", "Segoe UI Semibold", Arial, sans-serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:"Consolas","SFMono-Regular","Cascadia Mono","Courier New",monospace;
+  }
+
+  body{
+    background:var(--bg-void);
+    color:var(--text-primary);
+    font-family:var(--font-body);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+    position:relative;
+  }
+
+  /* ============ AMBIENT LAYERS ============ */
+  .grid-layer{
+    position:fixed;inset:0;
+    background-image:
+      linear-gradient(to right, var(--line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+    background-size:44px 44px;
+    opacity:0.35;
+    mask-image:radial-gradient(ellipse 80% 50% at 50% 0%, #000 20%, transparent 75%);
+    -webkit-mask-image:radial-gradient(ellipse 80% 50% at 50% 0%, #000 20%, transparent 75%);
+    pointer-events:none;
+    z-index:0;
+  }
+  .scan-layer{
+    position:fixed;inset:0;
+    background-image:repeating-linear-gradient(to bottom, rgba(255,255,255,0.018) 0px, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 3px);
+    pointer-events:none;
+    z-index:1;
+    mix-blend-mode:overlay;
+  }
+  .glow-layer{
+    position:fixed;top:-10%;left:50%;
+    transform:translateX(-50%);
+    width:1100px;height:700px;
+    background:radial-gradient(ellipse at center, var(--crimson-glow) 0%, transparent 65%);
+    opacity:0.28;
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px;position:relative;z-index:2;}
+  section{position:relative;z-index:2;}
+
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--crimson);
+    display:flex;align-items:center;gap:10px;
+    margin-bottom:16px;
+  }
+  .eyebrow::before{content:'';width:22px;height:1px;background:var(--crimson);}
+
+  h1,h2,h3{font-family:var(--font-display);text-transform:uppercase;letter-spacing:0.01em;font-weight:700;}
+
+  /* ============ HEADER ============ */
+  header{
+    position:sticky;top:0;z-index:50;
+    background:rgba(10,11,13,0.82);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 24px;
+    max-width:1160px;margin:0 auto;
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:17px;letter-spacing:0.03em;}
+  .brand-mark{
+    width:30px;height:30px;
+    border:1px solid var(--crimson);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-weight:700;font-size:13px;color:var(--crimson);
+    transform:rotate(45deg);
+    flex-shrink:0;
+  }
+  .brand-mark span{transform:rotate(-45deg);}
+  .brand-sub{color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:0.05em;text-transform:none;font-family:var(--font-mono);margin-left:2px;}
+
+  .nav-links{display:flex;align-items:center;gap:34px;}
+  .nav-links a{
+    font-family:var(--font-mono);font-size:12.5px;letter-spacing:0.06em;text-transform:uppercase;
+    color:var(--text-muted);
+    position:relative;
+    padding:4px 0;
+    transition:color 0.2s ease;
+  }
+  .nav-links a:hover{color:var(--text-primary);}
+  .nav-links a::after{
+    content:'';position:absolute;left:0;bottom:0;width:0;height:1px;background:var(--crimson);
+    transition:width 0.25s ease;
+  }
+  .nav-links a:hover::after{width:100%;}
+
+  .nav-cta{
+    font-family:var(--font-mono);font-size:12px;letter-spacing:0.05em;text-transform:uppercase;
+    border:1px solid var(--line-bright);color:var(--text-primary);
+    padding:8px 16px;
+    transition:border-color 0.2s ease, background 0.2s ease;
+  }
+  .nav-cta:hover{border-color:var(--crimson);background:rgba(214,69,63,0.08);}
+
+  @media (max-width:720px){
+    .nav-links{display:none;}
+  }
+
+  /* ============ BUTTONS ============ */
+  .btn{
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:var(--font-mono);font-size:13px;letter-spacing:0.06em;text-transform:uppercase;
+    padding:14px 26px;
+    border:1px solid transparent;
+    transition:transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    white-space:nowrap;
+  }
+  .btn-primary{
+    background:var(--crimson);color:#0a0b0d;font-weight:700;
+    box-shadow:0 0 0 0 rgba(214,69,63,0.5);
+  }
+  .btn-primary:hover{box-shadow:0 0 28px 0 rgba(214,69,63,0.45);transform:translateY(-1px);}
+  .btn-secondary{
+    border-color:var(--line-bright);color:var(--text-primary);
+  }
+  .btn-secondary:hover{border-color:var(--crimson);background:rgba(214,69,63,0.06);}
+  .btn svg{width:16px;height:16px;flex-shrink:0;}
+
+  /* ============ HERO ============ */
+  .hero{padding:120px 0 100px;}
+  .hero-inner{max-width:760px;}
+  .hero h1{
+    font-size:clamp(40px, 7vw, 76px);
+    line-height:0.98;
+    letter-spacing:-0.01em;
+    margin-bottom:18px;
+  }
+  .hero h1 .accent{color:var(--crimson);}
+  .hero .tagline{
+    font-family:var(--font-mono);
+    font-size:clamp(14px,2vw,17px);
+    color:var(--text-muted);
+    margin-bottom:22px;
+    letter-spacing:0.01em;
+  }
+  .hero p.desc{
+    max-width:560px;
+    color:var(--text-muted);
+    font-size:15.5px;
+    margin-bottom:38px;
+  }
+  .hero-actions{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:56px;}
+
+  .readout{
+    display:inline-flex;align-items:center;gap:14px;flex-wrap:wrap;
+    font-family:var(--font-mono);font-size:12px;letter-spacing:0.04em;
+    color:var(--text-dim);
+    border:1px solid var(--line);
+    padding:12px 18px;
+    background:rgba(19,21,25,0.6);
+  }
+  .readout .dot{
+    width:7px;height:7px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 8px var(--green);
+    animation:pulse 1.8s ease-in-out infinite;
+    flex-shrink:0;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .readout .sep{color:var(--line-bright);}
+  .readout .val{color:var(--text-muted);}
+
+  /* ============ SECTION HEAD ============ */
+  .section-head{max-width:640px;margin-bottom:52px;}
+  .section-head h2{font-size:clamp(28px,4vw,40px);margin-bottom:14px;}
+  .section-head p{color:var(--text-muted);font-size:15px;max-width:520px;}
+
+  /* ============ FEATURES ============ */
+  .features{padding:100px 0;border-top:1px solid var(--line);}
+  .feature-grid{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+  }
+  @media (max-width:900px){.feature-grid{grid-template-columns:repeat(2,1fr);}}
+  @media (max-width:560px){.feature-grid{grid-template-columns:1fr;}}
+
+  .fcard{
+    background:var(--bg-panel);
+    padding:34px 28px;
+    position:relative;
+    transition:background 0.25s ease;
+  }
+  .fcard:hover{background:var(--bg-panel-raised);}
+  .fcard::before,.fcard::after{
+    content:'';position:absolute;width:12px;height:12px;
+    border-color:var(--crimson);border-style:solid;border-width:0;
+    opacity:0;transition:opacity 0.25s ease;
+  }
+  .fcard::before{top:8px;left:8px;border-top-width:1.5px;border-left-width:1.5px;}
+  .fcard::after{bottom:8px;right:8px;border-bottom-width:1.5px;border-right-width:1.5px;}
+  .fcard:hover::before,.fcard:hover::after{opacity:1;}
+
+  .fcard .ficon{
+    width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line-bright);
+    color:var(--crimson);
+    margin-bottom:22px;
+  }
+  .fcard .ficon svg{width:19px;height:19px;}
+  .fcard h3{font-size:15.5px;letter-spacing:0.03em;margin-bottom:12px;}
+  .fcard p{color:var(--text-muted);font-size:13.8px;line-height:1.65;}
+
+  /* ============ INSTALLATION ============ */
+  .install{padding:100px 0;border-top:1px solid var(--line);}
+  .steps{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);}
+  .step{
+    display:grid;grid-template-columns:110px 1fr;
+    background:var(--bg-panel);
+  }
+  @media (max-width:640px){.step{grid-template-columns:1fr;}}
+
+  .step-num{
+    padding:30px 24px;
+    font-family:var(--font-mono);
+    color:var(--text-dim);
+    display:flex;flex-direction:column;justify-content:flex-start;gap:8px;
+    border-right:1px solid var(--line);
+  }
+  @media (max-width:640px){.step-num{border-right:none;border-bottom:1px solid var(--line);flex-direction:row;align-items:center;padding:16px 24px;}}
+  .step-num .n{font-size:26px;font-weight:700;color:var(--line-bright);}
+  .step.required .step-num .n{color:var(--amber);}
+
+  .step-body{padding:30px 32px 34px;}
+  .step-body h3{font-size:17px;letter-spacing:0.02em;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .tag{
+    font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;
+    padding:3px 9px;border:1px solid var(--amber);color:var(--amber);background:var(--amber-soft);
+  }
+  .step-body p{color:var(--text-muted);font-size:14.5px;max-width:640px;margin-bottom:16px;}
+
+  .breadcrumb{
+    display:flex;flex-wrap:wrap;align-items:center;gap:6px;
+    font-family:var(--font-mono);font-size:13px;
+    color:var(--text-muted);
+    margin-top:4px;
+  }
+  .breadcrumb .seg{padding:5px 10px;background:var(--bg-panel-raised);border:1px solid var(--line-bright);}
+  .breadcrumb .seg.hi{color:var(--crimson);border-color:var(--crimson-soft);}
+  .breadcrumb .sl{color:var(--text-dim);}
+
+  .copybox{
+    display:flex;align-items:stretch;
+    border:1px solid var(--line-bright);
+    background:var(--bg-panel-raised);
+    max-width:520px;
+    margin-top:6px;
+    overflow:hidden;
+  }
+  .copybox code{
+    flex:1;
+    font-family:var(--font-mono);font-size:13px;
+    color:var(--text-primary);
+    padding:13px 16px;
+    overflow-x:auto;
+    white-space:nowrap;
+  }
+  .copybox button{
+    flex-shrink:0;
+    display:flex;align-items:center;gap:7px;
+    padding:0 16px;
+    font-family:var(--font-mono);font-size:11.5px;letter-spacing:0.05em;text-transform:uppercase;
+    background:var(--bg-panel-hi);
+    border-left:1px solid var(--line-bright);
+    color:var(--text-muted);
+    transition:color 0.2s ease, background 0.2s ease;
+  }
+  .copybox button:hover{color:var(--text-primary);background:rgba(214,69,63,0.1);}
+  .copybox button svg{width:14px;height:14px;}
+  .copybox .caption{font-size:12px;color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);}
+
+  .faq-note{
+    margin-top:18px;
+    padding:14px 16px;
+    border-left:2px solid var(--line-bright);
+    background:var(--bg-panel-raised);
+    font-size:13.5px;color:var(--text-muted);
+  }
+  .faq-note strong{color:var(--text-primary);}
+
+  /* ============ FOOTER / OSS ============ */
+  .oss{padding:100px 0 60px;border-top:1px solid var(--line);}
+  .oss-panel{
+    border:1px solid var(--line);
+    background:var(--bg-panel);
+    padding:56px 44px;
+    display:flex;justify-content:space-between;align-items:center;gap:40px;
+    flex-wrap:wrap;
+  }
+  .oss-panel h2{font-size:26px;margin-bottom:12px;}
+  .oss-panel p{color:var(--text-muted);font-size:14.5px;max-width:440px;}
+  .oss-text{flex:1;min-width:260px;}
+  .oss-actions{display:flex;gap:14px;flex-wrap:wrap;}
+
+  footer{padding:30px 24px 50px;}
+  .footer-inner{
+    max-width:1160px;margin:0 auto;
+    display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;
+    font-family:var(--font-mono);font-size:12px;color:var(--text-dim);
+    padding-top:24px;border-top:1px solid var(--line);
+  }
+  .footer-inner a{color:var(--text-muted);transition:color 0.2s ease;}
+  .footer-inner a:hover{color:var(--crimson);}
+
+  /* ============ REVEAL ANIMATION ============ */
+  body.js-reveal .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s ease, transform 0.6s ease;}
+  body.js-reveal .reveal.is-visible{opacity:1;transform:translateY(0);}
+</style>
+</head>
+<body>
+
+<div class="grid-layer"></div>
+<div class="glow-layer"></div>
+<div class="scan-layer"></div>
+
+<header>
+  <nav class="nav">
+    <div class="brand">
+      <div class="brand-mark"><span>R</span></div>
+      RAVENM <span class="brand-sub">REWORKED</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#installation">Installation</a>
+      <a href="https://github.com/0xArdaT/RavenM-Reworked" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <a class="nav-cta" href="https://github.com/0xArdaT/RavenM-Reworked/releases" target="_blank" rel="noopener">Download</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-inner">
+        <div class="eyebrow">BEPINEX MOD // RAVENFIELD</div>
+        <h1>RAVENM <span class="accent">REWORKED</span></h1>
+        <div class="tagline">EA38 Compatible Multiplayer Mod for Ravenfield</div>
+        <p class="desc">A community-maintained continuation of RavenM — rebuilt from the ground up for Ravenfield's EA38 branch, with a long list of stability fixes, integrated voice chat, and a lighter footprint on your framerate.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/0xArdaT/RavenM-Reworked/releases" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m6 11 6 6 6-6"/><path d="M5 21h14"/></svg>
+            Download Latest Release
+          </a>
+          <a class="btn btn-secondary" href="https://github.com/0xArdaT/RavenM-Reworked" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18c-4.51 2-5-2-7-2"/><path d="M15 21v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91.65S17.73.3 15 2.15a13.38 13.38 0 0 0-6 0C6.27.3 5.09.65 5.09.65A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V21"/></svg>
+            View on GitHub
+          </a>
+        </div>
+        <div class="readout">
+          <span class="dot"></span>
+          <span>BUILD <span class="val">EA38</span></span>
+          <span class="sep">·</span>
+          <span>STATUS <span class="val">ONLINE</span></span>
+          <span class="sep">·</span>
+          <span>NETCODE <span class="val">STABLE</span></span>
+          <span class="sep">·</span>
+          <span>LICENSE <span class="val">OPEN SOURCE</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="features" id="features">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Capabilities</div>
+        <h2>Built for the front line</h2>
+        <p>Everything RavenM was, minus the jank — patched against the latest Ravenfield build and tuned to stay out of your way mid-match.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="fcard reveal">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.4 9 8 11 4.6-2 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+          </div>
+          <h3>EA38 Compatibility</h3>
+          <p>Rebuilt against Ravenfield's EA38 branch from the ground up, so RavenM keeps working after the update that broke every other mod loader integration.</p>
+        </div>
+        <div class="fcard reveal">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <h3>Stability Fixes</h3>
+          <p>A long list of crash, desync and lobby-join bugs from the original RavenM have been tracked down, reproduced and patched.</p>
+        </div>
+        <div class="fcard reveal">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/><path d="M9 22h6"/></svg>
+          </div>
+          <h3>Integrated Voice Chat</h3>
+          <p>Proximity voice chat built directly into the mod — no third-party overlay, no extra setup. Just squad up and talk.</p>
+        </div>
+        <div class="fcard reveal">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12 8 9"/><path d="M12 2v3"/><path d="M22 12h-3"/></svg>
+          </div>
+          <h3>Performance Improvements</h3>
+          <p>Lower memory overhead and fewer per-frame allocations than the original mod, so it stays out of your framerate's way.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALLATION ============ -->
+  <section class="install" id="installation">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Deployment</div>
+        <h2>Installation guide</h2>
+        <p>Four steps, no installers. Follow them in order — step one especially, or the plugin folder won't exist yet.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step required reveal">
+          <div class="step-num"><span class="n">01</span></div>
+          <div class="step-body">
+            <h3>Prepare BepInEx & first launch <span class="tag">Required</span></h3>
+            <p>Extract the BepInEx zip directly into your Ravenfield install folder, then launch the game once and close it again. This lets BepInEx generate its full folder structure — including the <code style="font-family:var(--font-mono);color:var(--text-primary);">plugins</code> folder you'll need in the next step. Skipping this is the #1 reason the mod "doesn't show up."</p>
+          </div>
+        </div>
+
+        <div class="step reveal">
+          <div class="step-num"><span class="n">02</span></div>
+          <div class="step-body">
+            <h3>Drop in RavenM.dll</h3>
+            <p>Download <code style="font-family:var(--font-mono);color:var(--text-primary);">RavenM.dll</code> from the Releases page and place it inside your BepInEx plugins folder — directly inside it, not in a subfolder.</p>
+            <div class="breadcrumb">
+              <span class="seg">Ravenfield</span><span class="sl">/</span>
+              <span class="seg">BepInEx</span><span class="sl">/</span>
+              <span class="seg">plugins</span><span class="sl">/</span>
+              <span class="seg hi">RavenM.dll</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="step reveal">
+          <div class="step-num"><span class="n">03</span></div>
+          <div class="step-body">
+            <h3>Copy the plugins path</h3>
+            <p>Steam's default install path for the plugins folder — click to copy, then paste it straight into Windows Explorer's address bar.</p>
+            <div class="copybox">
+              <code id="pathToCopy">\steamapps\common\Ravenfield\BepInEx\plugins</code>
+              <button id="copyBtn" type="button" aria-label="Copy path to clipboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+                <span id="copyLabel">Copy</span>
+              </button>
+            </div>
+            <div class="caption">Relative to your Steam library, e.g. C:\Program Files (x86)\Steam\steamapps\...</div>
+          </div>
+        </div>
+
+        <div class="step reveal">
+          <div class="step-num"><span class="n">04</span></div>
+          <div class="step-body">
+            <h3>Verify the install</h3>
+            <p>Launch Ravenfield. If everything's wired up correctly, you'll see <strong style="color:var(--text-primary);">RavenM Reworked v.xxx.xx</strong> printed in the bottom-left corner of the main menu and in-game.</p>
+            <div class="faq-note">
+              <strong>Not showing up?</strong> Make sure <code style="font-family:var(--font-mono);">RavenM.dll</code> sits directly inside <code style="font-family:var(--font-mono);">plugins</code> (not a subfolder), and that you completed step 01 — running the game once <em>before</em> copying the file in — so the folder actually exists.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OPEN SOURCE ============ -->
+  <section class="oss">
+    <div class="wrap">
+      <div class="oss-panel reveal">
+        <div class="oss-text">
+          <div class="eyebrow">Contributors</div>
+          <h2>Built in the open</h2>
+          <p>RavenM Reworked is fully open source. Read the code, file an issue, or send a pull request — every fix in this mod started as someone poking around the repo.</p>
+        </div>
+        <div class="oss-actions">
+          <a class="btn btn-secondary" href="https://github.com/0xArdaT/RavenM-Reworked" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18c-4.51 2-5-2-7-2"/><path d="M15 21v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91.65S17.73.3 15 2.15a13.38 13.38 0 0 0-6 0C6.27.3 5.09.65 5.09.65A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V21"/></svg>
+            View Repository
+          </a>
+          <a class="btn btn-primary" href="https://github.com/0xArdaT/RavenM-Reworked/tree/main/source" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Browse Source
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span>© <span id="year"></span> RavenM Reworked — maintained by 0xArdaT & contributors.</span>
+    <a href="https://github.com/0xArdaT/RavenM-Reworked" target="_blank" rel="noopener">github.com/0xArdaT/RavenM-Reworked</a>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  // ---- Copy to clipboard ----
+  (function(){
+    var btn = document.getElementById('copyBtn');
+    var label = document.getElementById('copyLabel');
+    var text = document.getElementById('pathToCopy').textContent;
+
+    btn.addEventListener('click', function(){
+      var done = function(){
+        label.textContent = 'Copied';
+        btn.style.color = '#5fa777';
+        setTimeout(function(){
+          label.textContent = 'Copy';
+          btn.style.color = '';
+        }, 1800);
+      };
+      var fail = function(){
+        label.textContent = 'Failed';
+        setTimeout(function(){ label.textContent = 'Copy'; }, 1800);
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fail);
+      } else {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          done();
+        } catch (e) {
+          fail();
+        }
+      }
+    });
+  })();
+
+  // ---- Scroll reveal ----
+  (function(){
+    if (!('IntersectionObserver' in window)) return;
+    document.body.classList.add('js-reveal');
+    var items = document.querySelectorAll('.reveal');
+    var observer = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    items.forEach(function(el){ observer.observe(el); });
+  })();
+</script>
+
+</body>
+</html>
