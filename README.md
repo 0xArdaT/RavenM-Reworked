@@ -82,5 +82,4 @@ Steps to build:
 
 - Original **RavenM** created by the RavenM Development Team.
 - Reworked, updated for EA 38, and maintained by **Arda (0xArdaT)**.
-- Discord Rich Presence Images Credit: `Wolffe#6986`
 - Licensed under the **GNU General Public License v3.0 (GPLv3)**.
