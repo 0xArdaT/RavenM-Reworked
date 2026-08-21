@@ -896,6 +896,8 @@ namespace RavenM
             RSPatch.RSPatch.OwnedObjects.Clear();
             RSPatch.RSPatch.ClientObjects.Clear();
             RSPatch.RSPatch.TargetGameObjectState.Clear();
+
+            _matchEndBroadcasted = false;
         }
 
         public void ResetState()
@@ -930,6 +932,8 @@ namespace RavenM
 
             IsClient = true;
 
+            _matchEndBroadcasted = false;
+
             foreach (var actor in FindObjectsOfType<Actor>())
             {
                 int id = actor.aiControlled ? BotIdGen++ : RandomGen.Next(13337, int.MaxValue);
@@ -955,6 +959,8 @@ namespace RavenM
             Plugin.logger.LogInfo("Starting client.");
 
             IsClient = true;
+
+            _matchEndBroadcasted = false;
 
             var player = ActorManager.instance.player;
             {
@@ -1119,16 +1125,15 @@ namespace RavenM
         }
 
         private float _lastMatchEndTime = -1000f;
+        private bool _matchEndBroadcasted = false;
 
         /// <summary>
         /// Send a MatchEnd notification (if host) and transition back to the map selection lobby.
         /// </summary>
         public void PerformMatchEndRedirect(bool broadcast, int winningTeam = -1)
         {
-            if (Time.time - _lastMatchEndTime < 5f)
+            if (broadcast && _matchEndBroadcasted)
                 return;
-
-            _lastMatchEndTime = Time.time;
 
             // Only the host can broadcast, and only when the match is actually over.
             if (broadcast && IsHost)
@@ -1136,26 +1141,46 @@ namespace RavenM
                 if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
                     return;
 
-                using MemoryStream memoryStream = new MemoryStream();
-                var matchEndPacket = new MatchEndPacket
+                try
                 {
-                    WinningTeam = winningTeam,
-                };
+                    using MemoryStream memoryStream = new MemoryStream();
+                    var matchEndPacket = new MatchEndPacket
+                    {
+                        WinningTeam = winningTeam,
+                    };
 
-                using (var writer = new ProtocolWriter(memoryStream))
-                {
-                    writer.Write(matchEndPacket);
+                    using (var writer = new ProtocolWriter(memoryStream))
+                    {
+                        writer.Write(matchEndPacket);
+                    }
+
+                    byte[] data = memoryStream.ToArray();
+                    BroadcastPacketToClients(data, PacketType.MatchEnd, Constants.k_nSteamNetworkingSend_Reliable);
+
+                    _matchEndBroadcasted = true;
+                    _lastMatchEndTime = Time.time;
                 }
-
-                byte[] data = memoryStream.ToArray();
-                BroadcastPacketToClients(data, PacketType.MatchEnd, Constants.k_nSteamNetworkingSend_Reliable);
+                catch (Exception e)
+                {
+                    Plugin.logger.LogError($"Failed to broadcast MatchEnd: {e}");
+                }
             }
 
             if (IsClient)
             {
-                IsAutoRedirecting = true;
-                GameManager.ReturnToMenu();
-                IsAutoRedirecting = false;
+                try
+                {
+                    IsAutoRedirecting = true;
+                    GameManager.ReturnToMenu();
+                }
+                catch (Exception e)
+                {
+                    Plugin.logger.LogError($"Failed to return to menu after match end: {e}");
+                }
+                finally
+                {
+                    IsAutoRedirecting = false;
+                }
             }
         }
 
@@ -1380,9 +1405,17 @@ namespace RavenM
             if (!IsClient)
                 return;
 
-            SteamNetworkingSockets.RunCallbacks();
+            try
+            {
+                if (IsHost && GameManager.instance != null && GameManager.instance.ingame && GameManager.gameOver && !_matchEndBroadcasted)
+                {
+                    Plugin.logger.LogInfo("Match over state detected; ensuring MatchEnd broadcast.");
+                    PerformMatchEndRedirect(true, -1);
+                }
 
-            if (IsClient)
+                SteamNetworkingSockets.RunCallbacks();
+
+                if (IsClient)
             {
                 var msg_ptr = new IntPtr[PACKET_SLACK];
                 int msg_count = SteamNetworkingSockets.ReceiveMessagesOnConnection(C2SConnection, msg_ptr, PACKET_SLACK);
@@ -1634,6 +1667,11 @@ namespace RavenM
 
                                             var prefab = PrefabCache[tag];
                                             vehicle = Instantiate(prefab, vehiclePacket.Position, vehiclePacket.Rotation).GetComponent<Vehicle>();
+                                            if (vehicle == null)
+                                            {
+                                                Plugin.logger.LogError($"Cannot find Vehicle component on prefab with hash {vehiclePacket.NameHash}.");
+                                                continue;
+                                            }
                                             vehicle.isTurret = vehiclePacket.IsTurret;
 
                                             vehicle.gameObject.AddComponent<GuidComponent>().guid = vehiclePacket.Id;
@@ -1681,6 +1719,9 @@ namespace RavenM
                                     Actor sourceActor = damage_packet.SourceActor == -1 ? null : ClientActors[damage_packet.SourceActor];
                                     Actor targetActor = ClientActors[damage_packet.Target];
 
+                                    if (targetActor == null)
+                                        break;
+
                                     Plugin.logger.LogInfo($"Got damage from {targetActor.name}!");
 
                                     DamageInfo damage_info = new DamageInfo
@@ -1711,6 +1752,9 @@ namespace RavenM
 
                                     Actor sourceActor = damage_packet.SourceActor == -1 ? null : ClientActors[damage_packet.SourceActor];
                                     Actor targetActor = ClientActors[damage_packet.Target];
+
+                                    if (targetActor == null)
+                                        break;
 
                                     Plugin.logger.LogInfo($"Got death from {targetActor.name}!");
 
@@ -2333,6 +2377,9 @@ namespace RavenM
                                     Actor sourceActor = damage_packet.SourceActor == -1 ? null : ClientActors[damage_packet.SourceActor];
                                     Vehicle targetVehicle = ClientVehicles[damage_packet.Target];
 
+                                    if (targetVehicle == null)
+                                        break;
+
                                     Plugin.logger.LogInfo($"Got vehicle damage from {targetVehicle.name}!");
 
                                     DamageInfo damage_info = new DamageInfo
@@ -2413,8 +2460,23 @@ namespace RavenM
                                         {
                                             var destructible = destructibles[i];
 
+                                            if (destructible == null)
+                                                continue;
+
+                                            if (i >= destructiblePacket.States.Length)
+                                                continue;
+
                                             if (!destructible.isDead && destructiblePacket.States[i])
-                                                destructible.Shatter(null);
+                                            {
+                                                try
+                                                {
+                                                    destructible.Shatter(null);
+                                                }
+                                                catch (Exception e)
+                                                {
+                                                    Plugin.logger.LogWarning($"Failed to shatter destructible in UpdateDestructible: {e}");
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -2423,13 +2485,33 @@ namespace RavenM
                                 {
                                     var destroyPacket = dataStream.ReadDestructibleDiePacket();
 
+                                    if (!ClientDestructibles.ContainsKey(destroyPacket.Id))
+                                        break;
+
                                     var root = ClientDestructibles[destroyPacket.Id];
-                                    var destructible = DestructiblePacket.GetDestructibles(root)[destroyPacket.Index];
+                                    if (root == null)
+                                    {
+                                        ClientDestructibles.Remove(destroyPacket.Id);
+                                        break;
+                                    }
+
+                                    var destructibles = DestructiblePacket.GetDestructibles(root);
+                                    if (destroyPacket.Index < 0 || destroyPacket.Index >= destructibles.Length)
+                                        break;
+
+                                    var destructible = destructibles[destroyPacket.Index];
 
                                     if (destructible == null || destructible.isDead)
                                         break;
 
-                                    destructible.Shatter(null);
+                                    try
+                                    {
+                                        destructible.Shatter(null);
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        Plugin.logger.LogWarning($"Failed to shatter destructible in DestroyDestructible: {e}");
+                                    }
                                 }
                                 break;
                             case PacketType.ChatCommand:
@@ -2618,15 +2700,16 @@ namespace RavenM
             {
                 MainSendTick.Start();
 
-                SendActorStates();
-
-                SendVehicleStates();
-
-                SendProjectileUpdates();
-
-                SendDestructibleUpdates();
-
-                SendGameState();
+                try { SendActorStates(); } catch (Exception e) { Plugin.logger.LogError($"SendActorStates failed: {e}"); }
+                try { SendVehicleStates(); } catch (Exception e) { Plugin.logger.LogError($"SendVehicleStates failed: {e}"); }
+                try { SendProjectileUpdates(); } catch (Exception e) { Plugin.logger.LogError($"SendProjectileUpdates failed: {e}"); }
+                try { SendDestructibleUpdates(); } catch (Exception e) { Plugin.logger.LogError($"SendDestructibleUpdates failed: {e}"); }
+                try { SendGameState(); } catch (Exception e) { Plugin.logger.LogError($"SendGameState failed: {e}"); }
+            }
+            }
+            catch (Exception e)
+            {
+                Plugin.logger.LogError($"IngameNetManager.FixedUpdate() aborted: {e}");
             }
         }
 
@@ -2927,7 +3010,13 @@ namespace RavenM
 
             foreach (var owned_actor in OwnedActors)
             {
+                if (!ClientActors.ContainsKey(owned_actor))
+                    continue;
+
                 var actor = ClientActors[owned_actor];
+
+                if (actor == null || actor.gameObject == null)
+                    continue;
 
                 ActorPacket net_actor = new ActorPacket
                 {
@@ -3148,12 +3237,17 @@ namespace RavenM
                     continue;
 
                 var tag = root.GetComponent<PrefabTag>();
+                if (tag == null)
+                    continue;
 
                 var destructibles = DestructiblePacket.GetDestructibles(root);
                 var states = new BitArray(destructibles.Length);
                 for (int i = 0; i < destructibles.Length; i++)
                 {
                     var destructible = destructibles[i];
+
+                    if (destructible == null)
+                        continue;
 
                     states.Set(i, destructible.isDead);
                 }
