@@ -356,6 +356,8 @@ namespace RavenM
 
         public bool MidgameJoin = false;
 
+        public bool PendingDiscordJoin = false;
+
         public string JoinLobbyID = string.Empty;
 
         public bool InLobby = false;
@@ -490,6 +492,7 @@ namespace RavenM
 
             if (pCallback.m_EChatRoomEnterResponse != (uint)EChatRoomEnterResponse.k_EChatRoomEnterResponseSuccess)
             {
+                PendingDiscordJoin = false;
                 NotificationText = "Unknown error joining lobby. (Does it still exist?)";
                 InLobby = false;
                 return;
@@ -497,6 +500,8 @@ namespace RavenM
 
             LobbyDataReady = true;
             ActualLobbyID = new CSteamID(pCallback.m_ulSteamIDLobby);
+            bool wasPendingDiscordJoin = PendingDiscordJoin;
+            PendingDiscordJoin = false;
 
             ChatManager.instance.PushLobbyChatMessage($"Welcome to the lobby! Press {ChatManager.instance.GlobalChatKeybind} to chat.");
 
@@ -599,7 +604,7 @@ namespace RavenM
                 {
                     nameTagsForTeamOnly = false;
                 }
-                if (SteamMatchmaking.GetLobbyData(ActualLobbyID, "started") == "yes" && SteamMatchmaking.GetLobbyData(ActualLobbyID, "hotjoin") != "true")
+                if (SteamMatchmaking.GetLobbyData(ActualLobbyID, "started") == "yes" && SteamMatchmaking.GetLobbyData(ActualLobbyID, "hotjoin") != "true" && !wasPendingDiscordJoin)
                 {
                     Plugin.logger.LogInfo("The game has already started :( Leaving lobby.");
                     NotificationText = "This lobby has already started a match and has disabled mid-game joining or is playing a gamemode that does not support it.";

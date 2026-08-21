@@ -515,6 +515,8 @@ namespace RavenM
         public Dictionary<Guid, List<int>> GuidActorOwnership = new Dictionary<Guid, List<int>>();
         /// Server owned
 
+        private Dictionary<CSteamID, Tuple<HSteamNetConnection, float>> _pendingConnections = new Dictionary<CSteamID, Tuple<HSteamNetConnection, float>>();
+
         public readonly System.Random RandomGen = new System.Random();
 
         private static readonly int PACKET_SLACK = 256;
@@ -633,6 +635,8 @@ namespace RavenM
 
         private void Update()
         {
+            VerifyPendingConnections();
+
             if (Input.GetKeyDown(KeyCode.F7))
                 _showSpecificOutbound = !_showSpecificOutbound;
 
@@ -910,6 +914,7 @@ namespace RavenM
             ServerConnections.Clear();
             ConnectionGuidMap.Clear();
             GuidActorOwnership.Clear();
+            _pendingConnections.Clear();
             ServerSocket = SteamNetworkingSockets.CreateListenSocketP2P(0, 0, null);
 
             PollGroup = SteamNetworkingSockets.CreatePollGroup();
@@ -1164,12 +1169,13 @@ namespace RavenM
                 switch (info.m_eState)
                 {
                     case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connecting:
-                        Plugin.logger.LogInfo($"Connection request from: {info.m_identityRemote.GetSteamID()}");
+                        var remoteId = info.m_identityRemote.GetSteamID();
+                        Plugin.logger.LogInfo($"Connection request from: {remoteId}");
 
                         bool inLobby = false;
                         foreach (var memberId in LobbySystem.instance.GetLobbyMembers())
                         {
-                            if (info.m_identityRemote.GetSteamID() == memberId)
+                            if (remoteId == memberId)
                             {
                                 inLobby = true;
                                 break;
@@ -1178,14 +1184,23 @@ namespace RavenM
 
                         if (!inLobby)
                         {
-                            SteamNetworkingSockets.CloseConnection(pCallback.m_hConn, 0, null, false);
-                            Plugin.logger.LogError("This user is not part of the lobby! Rejecting the connection.");
-                            break;
+                            if (LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID.IsValid() && GameManager.instance != null && GameManager.instance.ingame)
+                            {
+                                Plugin.logger.LogInfo($"Remote user {remoteId} is not yet in the local lobby member list; accepting as a pending mid-game connection.");
+                                _pendingConnections[remoteId] = Tuple.Create(pCallback.m_hConn, Time.time);
+                            }
+                            else
+                            {
+                                SteamNetworkingSockets.CloseConnection(pCallback.m_hConn, 0, null, false);
+                                Plugin.logger.LogError("This user is not part of the lobby! Rejecting the connection.");
+                                break;
+                            }
                         }
 
                         if (SteamNetworkingSockets.AcceptConnection(pCallback.m_hConn) != EResult.k_EResultOK)
                         {
                             SteamNetworkingSockets.CloseConnection(pCallback.m_hConn, 0, null, false);
+                            _pendingConnections.Remove(remoteId);
                             Plugin.logger.LogError("Failed to accept connection");
                             break;
                         }
@@ -1211,7 +1226,9 @@ namespace RavenM
                     case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer:
                     case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
                         Plugin.logger.LogInfo($"Killing connection from {info.m_identityRemote.GetSteamID()}.");
+                        var closingRemoteId = info.m_identityRemote.GetSteamID();
                         SteamNetworkingSockets.CloseConnection(pCallback.m_hConn, 0, null, false);
+                        _pendingConnections.Remove(closingRemoteId);
 
                         // We destroy all the actors that were left behind.
                         if (ServerConnections.Contains(pCallback.m_hConn))
@@ -1306,6 +1323,56 @@ namespace RavenM
                         break;
                 }
             }
+        }
+
+        private void VerifyPendingConnections()
+        {
+            if (!IsHost || _pendingConnections.Count == 0)
+                return;
+
+            var members = LobbySystem.instance.GetLobbyMembers();
+            var now = Time.time;
+            var verified = new List<CSteamID>();
+
+            foreach (var kv in _pendingConnections)
+            {
+                bool isMember = false;
+                foreach (var member in members)
+                {
+                    if (member.Equals(kv.Key))
+                    {
+                        isMember = true;
+                        break;
+                    }
+                }
+
+                if (isMember)
+                {
+                    Plugin.logger.LogInfo($"Pending connection {kv.Key} is now a verified lobby member.");
+                    verified.Add(kv.Key);
+                    continue;
+                }
+
+                if (now - kv.Value.Item2 > 5f)
+                {
+                    Plugin.logger.LogWarning($"Pending connection {kv.Key} did not join the lobby in time; closing.");
+                    SteamNetworkingSockets.CloseConnection(kv.Value.Item1, 0, null, false);
+
+                    for (int i = ServerConnections.Count - 1; i >= 0; i--)
+                    {
+                        if (ServerConnections[i].m_HSteamNetConnection == kv.Value.Item1.m_HSteamNetConnection)
+                        {
+                            ServerConnections.RemoveAt(i);
+                            break;
+                        }
+                    }
+
+                    verified.Add(kv.Key);
+                }
+            }
+
+            foreach (var id in verified)
+                _pendingConnections.Remove(id);
         }
 
         void FixedUpdate()

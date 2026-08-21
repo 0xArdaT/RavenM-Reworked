@@ -35,6 +35,9 @@ namespace RavenM
         private string _pendingDisconnectReason;
         private string _lastDiscordStatus;
 
+        private string _currentPartyId;
+        private string _currentJoinSecret;
+
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         static extern IntPtr LoadLibrary(string lpPathName);
 
@@ -290,24 +293,45 @@ namespace RavenM
             _isInGame = GameManager.instance.ingame;
             _isInLobby = LobbySystem.instance != null && LobbySystem.instance.InLobby;
 
+            string partyId = null;
+
+            if (_isInLobby || _isInGame)
+            {
+                if (LobbySystem.instance != null && LobbySystem.instance.ActualLobbyID.IsValid())
+                {
+                    partyId = LobbySystem.instance.ActualLobbyID.ToString();
+                    _currentPartyId = partyId;
+                    _currentJoinSecret = partyId + "_join";
+                }
+                else if (_isInGame && !string.IsNullOrEmpty(_currentPartyId))
+                {
+                    partyId = _currentPartyId;
+                }
+            }
+            else
+            {
+                _currentPartyId = null;
+                _currentJoinSecret = null;
+            }
+
             if (_isInGame)
             {
                 _gameMode = GetGameModeName();
                 var map = GetMapName();
                 var score = GetScoreString();
                 var (players, max) = GetPlayerCounts();
-                var state = _isInLobby ? "Playing Multiplayer" : "Playing Singleplayer";
-                var details = $"{map} - {_gameMode}{score} ({players}/{max} Players)";
-                UpdateActivity(Discord, Activities.InMatch, state, details, players, max);
+                var state = "In Match";
+                var details = $"Playing {map} - {_gameMode}{score} ({players}/{max} Players)";
+                UpdateActivity(Discord, Activities.InMatch, state, details, players, max, partyId);
             }
             else if (_isInLobby)
             {
                 _gameMode = GetGameModeName();
                 var map = GetMapName();
                 var (players, max) = GetPlayerCounts();
-                var state = "Waiting In Lobby";
+                var state = "In Lobby";
                 var details = $"{map} - {_gameMode} ({players}/{max} Players)";
-                UpdateActivity(Discord, Activities.InLobby, state, details, players, max, LobbySystem.instance.ActualLobbyID.ToString());
+                UpdateActivity(Discord, Activities.InLobby, state, details, players, max, partyId);
             }
             else
             {
@@ -426,8 +450,20 @@ namespace RavenM
 
             var LobbyID = new CSteamID(lobbyIdUlong);
 
+            if (LobbySystem.instance != null)
+            {
+                if (LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID == LobbyID)
+                {
+                    Plugin.logger.LogInfo("Already in the target Discord lobby.");
+                    return;
+                }
+
+                LobbySystem.instance.PendingDiscordJoin = true;
+            }
+
             if (_isInGame)
             {
+                Plugin.logger.LogInfo("Currently in-game; returning to main menu before joining Discord lobby.");
                 GameManager.ReturnToMenu();
             }
 
@@ -454,7 +490,7 @@ namespace RavenM
             }
         }
 
-        public void UpdateActivity(Discord discord, Activities activity, string state = "", string details = "", int currentPlayers = 1, int maxPlayers = 2, string lobbyID = "None")
+        public void UpdateActivity(Discord discord, Activities activity, string state = "", string details = "", int currentPlayers = 1, int maxPlayers = 2, string lobbyID = "")
         {
             var activityManager = discord.GetActivityManager();
             var activityPresence = new Activity();
@@ -474,39 +510,11 @@ namespace RavenM
                     };
                     break;
                 case Activities.InLobby:
-                    activityPresence = new Activity()
-                    {
-                        State = string.IsNullOrEmpty(state) ? "Waiting In Lobby" : state,
-                        Details = details,
-                        Timestamps =
-                        {
-                            Start = startSessionTime,
-                        },
-                        Assets =
-                        {
-                            LargeImage = "rfimg_1_",
-                            LargeText = "RavenM",
-                        },
-                        Party =
-                        {
-                            Id = lobbyID,
-                            Size =
-                            {
-                                CurrentSize = currentPlayers,
-                                MaxSize = maxPlayers,
-                            },
-                        },
-                        Secrets =
-                        {
-                            Join = lobbyID + "_join",
-                        },
-                        Instance = true,
-                    };
-                    break;
                 case Activities.InMatch:
+                    bool hasParty = !string.IsNullOrEmpty(lobbyID);
                     activityPresence = new Activity()
                     {
-                        State = string.IsNullOrEmpty(state) ? "Playing" : state,
+                        State = string.IsNullOrEmpty(state) ? (activity == Activities.InLobby ? "Waiting In Lobby" : "Playing") : state,
                         Details = details,
                         Timestamps =
                         {
@@ -519,7 +527,7 @@ namespace RavenM
                         },
                         Party =
                         {
-                            Id = lobbyID,
+                            Id = hasParty ? lobbyID : string.Empty,
                             Size =
                             {
                                 CurrentSize = currentPlayers,
@@ -528,7 +536,7 @@ namespace RavenM
                         },
                         Secrets =
                         {
-                            Join = lobbyID == "None" ? string.Empty : lobbyID + "_join",
+                            Join = hasParty ? lobbyID + "_join" : string.Empty,
                         },
                         Instance = true,
                     };
