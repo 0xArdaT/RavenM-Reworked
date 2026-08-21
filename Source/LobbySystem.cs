@@ -95,6 +95,10 @@ namespace RavenM
                 IngameNetManager.instance.OpenRelay();
 
                 LobbySystem.instance.SetLobbyDataDedup("started", "yes");
+
+                // Keep the lobby joinable while a match is running so Discord
+                // invites remain usable mid-game.
+                SteamMatchmaking.SetLobbyJoinable(LobbySystem.instance.ActualLobbyID, true);
             }
 
             LobbySystem.instance.ReadyToPlay = false;
@@ -508,6 +512,7 @@ namespace RavenM
             if (IsLobbyOwner)
             {
                 OwnerID = SteamUser.GetSteamID();
+                SteamMatchmaking.SetLobbyJoinable(ActualLobbyID, true);
                 SetLobbyDataDedup("owner", OwnerID.ToString());
                 SetLobbyDataDedup("build_id", Plugin.BuildGUID);
                 if (!ShowOnList)

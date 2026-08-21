@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using RavenM.DiscordGameSDK;
 using Steamworks;
 using UnityEngine;
@@ -38,6 +40,10 @@ namespace RavenM
 
         private string _currentPartyId;
         private string _currentJoinSecret;
+
+        // Discord RPC callbacks can fire on background threads. Join secrets are
+        // queued here and consumed on the Unity main thread.
+        private readonly ConcurrentQueue<string> _pendingJoinSecrets = new ConcurrentQueue<string>();
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         static extern IntPtr LoadLibrary(string lpPathName);
@@ -275,6 +281,23 @@ namespace RavenM
             }
         }
 
+        private void Update()
+        {
+            while (_pendingJoinSecrets.TryDequeue(out string secret))
+            {
+                try
+                {
+                    HandleJoinSecretOnMainThread(secret);
+                }
+                catch (Exception e)
+                {
+                    Plugin.logger.LogError($"[RavenM RPC] Failed to process join secret: {e}");
+                    if (LobbySystem.instance != null)
+                        LobbySystem.instance.NotificationText = "Failed to connect: Invalid Lobby or Host Unreachable";
+                }
+            }
+        }
+
         private void UpdatePresence()
         {
             if (Discord == null || GameManager.instance == null)
@@ -302,7 +325,13 @@ namespace RavenM
                 {
                     partyId = LobbySystem.instance.ActualLobbyID.ToString();
                     _currentPartyId = partyId;
-                    _currentJoinSecret = partyId;
+
+                    var joinSecret = "STEAM_" + partyId;
+                    if (_currentJoinSecret != joinSecret)
+                    {
+                        _currentJoinSecret = joinSecret;
+                        Plugin.logger.LogInfo($"[RavenM RPC] Setting Join Secret: {joinSecret}");
+                    }
                 }
                 else if (_isInGame && !string.IsNullOrEmpty(_currentPartyId))
                 {
@@ -437,52 +466,137 @@ namespace RavenM
 
         private void OnDiscordActivityJoin(string secret)
         {
+            Plugin.logger.LogInfo($"[RavenM RPC] OnJoin Triggered on thread: {Thread.CurrentThread.ManagedThreadId}");
+            Plugin.logger.LogInfo($"[RavenM RPC] Received Join Secret: {secret}");
+
             if (string.IsNullOrEmpty(secret))
-                return;
-
-            secret = secret.Trim();
-            secret = new string(secret.Where(char.IsDigit).ToArray());
-
-            Plugin.logger.LogInfo($"OnJoin sanitized secret: {secret}");
-
-            if (string.IsNullOrEmpty(secret) || !ulong.TryParse(secret, out ulong lobbyIdUlong))
             {
-                Plugin.logger.LogWarning("Discord join secret was not a valid lobby ID.");
+                Plugin.logger.LogWarning("[RavenM RPC] Join secret was empty; ignoring.");
                 return;
             }
 
-            var LobbyID = new CSteamID(lobbyIdUlong);
+            // Dispatch to the Unity main thread; Unity APIs are not thread-safe.
+            _pendingJoinSecrets.Enqueue(secret);
+        }
 
-            if (!LobbyID.IsValid())
+        private void HandleJoinSecretOnMainThread(string secret)
+        {
+            Plugin.logger.LogInfo($"[RavenM RPC] Parsing Secret & Executing Connect... ({secret})");
+
+            if (!TryParseJoinSecret(secret, out CSteamID lobbyId))
             {
-                Plugin.logger.LogWarning($"Discord join secret parsed to an invalid Steam lobby ID: {secret}");
+                Plugin.logger.LogWarning($"[RavenM RPC] Join secret could not be parsed: {secret}");
+                if (LobbySystem.instance != null)
+                    LobbySystem.instance.NotificationText = "Failed to connect: Invalid Lobby or Host Unreachable";
                 return;
             }
+
+            Plugin.logger.LogInfo($"[RavenM RPC] Parsed lobby ID: {lobbyId}");
 
             if (LobbySystem.instance != null)
             {
-                if (LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID == LobbyID)
+                if (LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID == lobbyId)
                 {
-                    Plugin.logger.LogInfo("Already in the target Discord lobby.");
+                    Plugin.logger.LogInfo("[RavenM RPC] Already in the target Discord lobby.");
                     return;
                 }
-
-                LobbySystem.instance.PendingDiscordJoin = true;
             }
 
-            if (_isInGame)
+            try
             {
-                Plugin.logger.LogInfo("Currently in-game; returning to main menu before joining Discord lobby.");
-                GameManager.ReturnToMenu();
+                // If we are already in a match or lobby, disconnect cleanly first.
+                if (GameManager.instance != null && GameManager.instance.ingame)
+                {
+                    Plugin.logger.LogInfo("[RavenM RPC] Currently in-game; disconnecting from current match before joining.");
+                    GameManager.ReturnToMenu();
+                }
+
+                if (LobbySystem.instance != null && LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID.IsValid())
+                {
+                    Plugin.logger.LogInfo("[RavenM RPC] Leaving current lobby before joining the new one.");
+                    SteamMatchmaking.LeaveLobby(LobbySystem.instance.ActualLobbyID);
+                    LobbySystem.instance.InLobby = false;
+                    LobbySystem.instance.LobbyDataReady = false;
+                }
+
+                if (IngameNetManager.instance != null && IngameNetManager.instance.IsClient)
+                {
+                    Plugin.logger.LogInfo("[RavenM RPC] Resetting IngameNetManager state before joining.");
+                    IngameNetManager.instance.ResetState();
+                }
+
+                if (LobbySystem.instance != null)
+                {
+                    LobbySystem.instance.PendingDiscordJoin = true;
+                    LobbySystem.instance.NotificationText = "Connecting to Lobby...";
+
+                    Plugin.logger.LogInfo($"[RavenM RPC] Executing SteamMatchmaking.JoinLobby({lobbyId})");
+                    SteamMatchmaking.JoinLobby(lobbyId);
+                    LobbySystem.instance.InLobby = true;
+                    LobbySystem.instance.IsLobbyOwner = false;
+                    LobbySystem.instance.LobbyDataReady = false;
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.logger.LogError($"[RavenM RPC] Connect failed: {e}");
+                if (LobbySystem.instance != null)
+                {
+                    LobbySystem.instance.PendingDiscordJoin = false;
+                    LobbySystem.instance.NotificationText = "Failed to connect: Invalid Lobby or Host Unreachable";
+                }
+            }
+        }
+
+        /// <summary>
+        /// Parses a join secret of the form STEAM_&lt;lobbyId&gt; or IP_&lt;ip&gt;:&lt;port&gt;.
+        /// Bare numeric secrets are accepted as raw Steam lobby IDs for backwards compatibility.
+        /// </summary>
+        public static bool TryParseJoinSecret(string secret, out CSteamID lobbyId)
+        {
+            lobbyId = CSteamID.Nil;
+
+            if (string.IsNullOrEmpty(secret))
+                return false;
+
+            secret = secret.Trim();
+
+            if (secret.StartsWith("STEAM_", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = secret.Substring("STEAM_".Length).Trim();
+
+                if (payload.Length == 0 || payload.Length > 20)
+                    return false;
+
+                if (!ulong.TryParse(payload, out ulong id))
+                    return false;
+
+                var candidate = new CSteamID(id);
+                if (!candidate.IsValid())
+                    return false;
+
+                lobbyId = candidate;
+                return true;
             }
 
-            if (LobbySystem.instance != null)
+            if (secret.StartsWith("IP_", StringComparison.OrdinalIgnoreCase))
             {
-                SteamMatchmaking.JoinLobby(LobbyID);
-                LobbySystem.instance.InLobby = true;
-                LobbySystem.instance.IsLobbyOwner = false;
-                LobbySystem.instance.LobbyDataReady = false;
+                // Direct IP connections are not supported by the Steam relay transport.
+                Plugin.logger.LogWarning($"[RavenM RPC] IP_ join secrets are not supported by the Steam relay transport: {secret}");
+                return false;
             }
+
+            // Backwards compatibility: bare lobby ID (optionally with legacy _join suffix).
+            var digits = new string(secret.Where(char.IsDigit).ToArray());
+            if (digits.Length == 0 || digits.Length > 20 || !ulong.TryParse(digits, out ulong legacyId))
+                return false;
+
+            var legacyCandidate = new CSteamID(legacyId);
+            if (!legacyCandidate.IsValid())
+                return false;
+
+            lobbyId = legacyCandidate;
+            return true;
         }
 
         private void OnDiscordActivityJoinRequest(ref User user)
@@ -545,7 +659,7 @@ namespace RavenM
                         },
                         Secrets =
                         {
-                            Join = hasParty ? lobbyID : string.Empty,
+                            Join = hasParty ? "STEAM_" + lobbyID : string.Empty,
                         },
                         Instance = true,
                     };
