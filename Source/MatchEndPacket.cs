@@ -19,6 +19,7 @@ namespace RavenM
 
     /// <summary>
     /// Hook GameManager.OnGameEnded to broadcast a match-end RPC and redirect everyone back to the lobby.
+    /// Only act if the match has actually concluded (GameManager.gameOver is set).
     /// </summary>
     [HarmonyPatch(typeof(GameManager), "OnGameEnded")]
     public class GameManagerOnGameEndedPatch
@@ -26,6 +27,9 @@ namespace RavenM
         static void Postfix()
         {
             if (!IngameNetManager.instance.IsClient || !IngameNetManager.instance.IsHost)
+                return;
+
+            if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
                 return;
 
             // If OnWin triggered first, let it handle the redirect.
@@ -49,6 +53,7 @@ namespace RavenM
 
     /// <summary>
     /// Hook GameManager.OnWin as a fallback match-end trigger.
+    /// Only act when GameManager has actually marked the match as over.
     /// </summary>
     [HarmonyPatch(typeof(GameManager), "OnWin")]
     public class GameManagerOnWinPatch
@@ -56,6 +61,9 @@ namespace RavenM
         static void Postfix(int winner, bool continueNeverendingBattle)
         {
             if (!IngameNetManager.instance.IsClient || !IngameNetManager.instance.IsHost)
+                return;
+
+            if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
                 return;
 
             // If this OnWin was called from OnGameEnded, OnGameEnded will handle the redirect.
