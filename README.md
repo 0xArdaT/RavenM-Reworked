@@ -23,7 +23,7 @@ This mod depends on [BepInEx](https://github.com/BepInEx/BepInEx), a cross-platf
 
 First, install BepInEx into Ravenfield following the installation instructions [here](https://docs.bepinex.dev/articles/user_guide/installation/index.html). As per the instructions, make sure to run the game at least once with BepInEx installed before adding the mod to generate config files.
 
-Next, download the latest RavenM Reworked release [here](https://github.com/0xArdaT/RavenM-Reworked/releases/latest) and unzip the file, place `RavenM.dll` into `Ravenfield/BepInEx/plugins/`. Optionally, you may also place `RavenM.pdb` to generate better debug information in the logs.
+Next, download the latest RavenM Reworked release [here](https://github.com/0xArdaT/RavenM-Reworked/releases/latest).Place `RavenM.dll` into `Ravenfield/BepInEx/plugins/`. Optionally, you may also place `RavenM.pdb` to generate better debug information in the logs.
 
 Run the game and RavenM should now be installed.
 
