@@ -692,21 +692,30 @@ namespace RavenM
         {
             InitializeChatArea(isLobbyChat, chatWidth, 160f, chatXOffset);
 
-            var chatStyle = new GUIStyle();
-            chatStyle.normal.background = GreyBackground;
-            
-            var textStyle = new GUIStyle();
-            textStyle.wordWrap = wordWrap;
-            textStyle.normal.textColor = Color.white;
+            float scale = Screen.width / 1920f;
+
+            var chatStyle = new GUIStyle()
+            {
+                normal = { background = GreyBackground, textColor = new Color(0.9f, 0.94f, 0.96f) },
+                padding = new RectOffset(10, 10, 8, 8),
+                border = new RectOffset(0, 0, 0, 0),
+            };
+
+            var textStyle = new GUIStyle()
+            {
+                wordWrap = wordWrap,
+                richText = true,
+            };
+            textStyle.normal.textColor = new Color(0.9f, 0.94f, 0.96f);
             if (!wordWrap)
                 textStyle.wordWrap = false;
-                
-            GUILayout.BeginArea(new Rect(chatXOffset, Screen.height - chatYOffset, chatWidth, chatHeight), string.Empty, chatStyle);
+
+            GUILayout.BeginArea(new Rect(chatXOffset * scale, Screen.height - (chatYOffset * scale), chatWidth * scale, chatHeight * scale), string.Empty, chatStyle);
             GUILayout.BeginVertical();
             GUILayout.Space(10);
-            ChatScrollPosition = GUILayout.BeginScrollView(ChatScrollPosition, GUILayout.Width(chatWidth), GUILayout.Height(chatHeight - 15f));
+            ChatScrollPosition = GUILayout.BeginScrollView(ChatScrollPosition, GUILayout.Width(chatWidth * scale - 20f), GUILayout.Height(chatHeight * scale - 25f));
             // Any player can break the formatting by using Rich Text e.g. <color=abcd> <b> - Chai
-            GUILayout.Label(FullChatLink, textStyle, GUILayout.Width(chatWidth - 30f));
+            GUILayout.Label(FullChatLink, textStyle, GUILayout.Width(chatWidth * scale - 30f));
             GUILayout.EndScrollView();
             GUILayout.Space(10);
             GUILayout.EndVertical();
