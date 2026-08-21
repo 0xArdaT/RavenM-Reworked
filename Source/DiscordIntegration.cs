@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Reflection;
 using RavenM.DiscordGameSDK;
 using Steamworks;
 using UnityEngine;
@@ -11,7 +12,7 @@ namespace RavenM
     public class DiscordIntegration : MonoBehaviour
     {
         public static DiscordIntegration instance;
-        
+
         public Discord Discord;
 
         public long discordClientID = 1007054793220571247;
@@ -20,8 +21,14 @@ namespace RavenM
 
         private ActivityManager _activityManager;
 
+
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         static extern IntPtr LoadLibrary(string lpPathName);
+
+        private void Awake()
+        {
+            instance = this;
+        }
 
         private void Start()
         {
@@ -31,15 +38,15 @@ namespace RavenM
             }
             // Non BepInEx Plugin dlls have no effect in systems that are not windows
             // copying them to ravenfield_Data/Plugins seems to fix it
-            else if(Environment.OSVersion.Platform == PlatformID.Unix)
+            else if (Environment.OSVersion.Platform == PlatformID.Unix)
             {
                 if (Directory.Exists("ravenfield_Data")) // Assume its the linux installation
                 {
                     if (!File.Exists("ravenfield_Data/Plugins/discord_game_sdk.so"))
                     {
                         Plugin.logger.LogWarning("Linux Discord Library Not Found, Attempting to Copy it from lib folder");
-                    
-                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.so","ravenfield_Data/Plugins/discord_game_sdk.so");
+
+                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.so", "ravenfield_Data/Plugins/discord_game_sdk.so");
                     }
                 }
                 else if (Directory.Exists("ravenfield.app")) // Assume its the MacOS installation
@@ -47,61 +54,60 @@ namespace RavenM
                     if (!File.Exists("ravenfield.app/Contents/Plugins/discord_game_sdk.dylib"))
                     {
                         Plugin.logger.LogWarning("MacOS Discord Library Not Found, Attempting to Copy it from lib folder");
-                    
-                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.dylib","ravenfield.app/Contents/Plugins/discord_game_sdk.dylib");
+
+                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.dylib", "ravenfield.app/Contents/Plugins/discord_game_sdk.dylib");
                     }
                     if (!File.Exists("ravenfield.app/Contents/Plugins/discord_game_sdk.bundle"))
                     {
                         Plugin.logger.LogWarning("MacOS Discord Library Not Found, Attempting to Copy it from lib folder");
-                    
-                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.bundle","ravenfield.app/Contents/Plugins/discord_game_sdk.bundle");
+
+                        File.Copy("BepInEx/plugins/lib/discord_game_sdk.bundle", "ravenfield.app/Contents/Plugins/discord_game_sdk.bundle");
                     }
                 }
-                
             }
 
             try
             {
                 Discord = new Discord(discordClientID, (UInt64)CreateFlags.NoRequireDiscord);
             }
-            catch
+            catch (Exception e)
             {
-                Plugin.logger.LogError("Failed to initialize Discord pipe.");
+                Plugin.logger.LogWarning($"Discord RPC failed to initialize (Discord may not be running): {e.Message}");
                 return;
             }
-            
-            Plugin.logger.LogInfo("Discord Instance created");
-            startSessionTime = ((DateTimeOffset) DateTime.Now).ToUnixTimeSeconds();
-            
-            _activityManager = Discord.GetActivityManager();
-            
-            StartCoroutine(StartActivities());
-            
-            _activityManager.OnActivityJoin += secret =>
-            {
-                secret = secret.Replace("_join", "");
-                
-                Plugin.logger.LogInfo($"OnJoin {secret}");
-                var LobbyID = new CSteamID(ulong.Parse(secret));
 
-                if (_isInGame)
-                {
-                    GameManager.ReturnToMenu();
-                }
-                
-                SteamMatchmaking.JoinLobby(LobbyID);
-                LobbySystem.instance.InLobby = true;
-                LobbySystem.instance.IsLobbyOwner = false;
-                LobbySystem.instance.LobbyDataReady = false;
-            };
-            
-            _activityManager.OnActivityJoinRequest += (ref User user) =>
+            Plugin.logger.LogInfo("Discord Instance created");
+            startSessionTime = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds();
+
+            _activityManager = Discord.GetActivityManager();
+
+            _activityManager.OnActivityJoin += OnDiscordActivityJoin;
+            _activityManager.OnActivityJoinRequest += OnDiscordActivityJoinRequest;
+            _activityManager.OnActivitySpectate += secret =>
             {
-                // The Ask to join Button Doesnt even work rn (Discord's fault) try the right click Ask to join button instead
-                Plugin.logger.LogInfo($"OnJoinRequest {user.Username} {user.Id}");
+                Plugin.logger.LogInfo($"OnActivitySpectate {secret}");
             };
+
+            StartCoroutine(StartActivities());
         }
-        
+
+        private void OnApplicationQuit()
+        {
+            if (Discord != null)
+            {
+                try
+                {
+                    _activityManager?.ClearActivity(result => { });
+                    Discord.Dispose();
+                    Discord = null;
+                }
+                catch (Exception e)
+                {
+                    Plugin.logger.LogWarning($"Discord RPC shutdown failed: {e.Message}");
+                }
+            }
+        }
+
         IEnumerator StartActivities()
         {
             UpdateActivity(Discord, Activities.InitialActivity);
@@ -109,21 +115,27 @@ namespace RavenM
             UpdateActivity(Discord, Activities.InMenu);
         }
 
-        // Private Variables that makes me question my coding skills
         private TimedAction _timer = new TimedAction(5f);
-        
+
         private string _gameMode = "Insert Game Mode";
+
         private void FixedUpdate()
         {
             if (Discord == null)
                 return;
 
-            Discord.RunCallbacks();
+            try
+            {
+                Discord.RunCallbacks();
+            }
+            catch (Exception e)
+            {
+                Plugin.logger.LogWarning($"Discord RPC callback error: {e.Message}");
+            }
 
             if (_timer.TrueDone())
             {
                 ChangeActivityDynamically();
-
                 _timer.Start();
             }
         }
@@ -133,43 +145,179 @@ namespace RavenM
 
         void ChangeActivityDynamically()
         {
-            if (GameManager.instance == null) { return; }
+            if (Discord == null || GameManager.instance == null)
+                return;
 
             _isInGame = GameManager.instance.ingame;
-            _isInLobby = LobbySystem.instance.InLobby;
+            _isInLobby = LobbySystem.instance != null && LobbySystem.instance.InLobby;
 
-
-            if (_isInGame && !_isInLobby)
+            if (_isInGame)
             {
-                _gameMode = InstantActionConfigMenu.instance?.selectedGameMode?.name ?? "";
-                UpdateActivity(Discord, Activities.InSinglePlayerGame, true ,_gameMode);
+                _gameMode = GetGameModeName();
+                var map = GetMapName();
+                var score = GetScoreString();
+                var (players, max) = GetPlayerCounts();
+                var state = _isInLobby ? "Playing Multiplayer" : "Playing Singleplayer";
+                var details = $"{map} - {_gameMode}{score} ({players}/{max} Players)";
+                UpdateActivity(Discord, Activities.InMatch, state, details, players, max);
             }
             else if (_isInLobby)
             {
-                int currentLobbyMembers = SteamMatchmaking.GetNumLobbyMembers(LobbySystem.instance.ActualLobbyID);
-                int currentLobbyMemberCap = SteamMatchmaking.GetLobbyMemberLimit(LobbySystem.instance.ActualLobbyID);
-
-                if (!_isInGame) // Waiting in Lobby
-                {
-                    _gameMode = InstantActionConfigMenu.instance?.selectedGameMode?.name ?? "";
-                    UpdateActivity(Discord, Activities.InLobby, false ,_gameMode, currentLobbyMembers, currentLobbyMemberCap, LobbySystem.instance.ActualLobbyID.ToString());
-                }
-                else // Playing in a Lobby
-                {
-                    UpdateActivity(Discord, Activities.InLobby, true ,_gameMode, currentLobbyMembers, currentLobbyMemberCap, LobbySystem.instance.ActualLobbyID.ToString());
-                }
+                _gameMode = GetGameModeName();
+                var map = GetMapName();
+                var (players, max) = GetPlayerCounts();
+                var state = "Waiting In Lobby";
+                var details = $"{map} - {_gameMode} ({players}/{max} Players)";
+                UpdateActivity(Discord, Activities.InLobby, state, details, players, max, LobbySystem.instance.ActualLobbyID.ToString());
             }
-            else // Left the lobby
+            else
             {
                 UpdateActivity(Discord, Activities.InMenu);
             }
         }
-        
-        public void UpdateActivity(Discord discord, Activities activity, bool inGame = false, string gameMode = "None", int currentPlayers = 1, int maxPlayers = 2, string lobbyID = "None")
+
+        private string GetMapName()
+        {
+            if (GameManager.instance != null && !string.IsNullOrEmpty(GameManager.instance.mapDisplayName))
+                return GameManager.instance.mapDisplayName;
+
+            if (GameManager.instance != null && !string.IsNullOrEmpty(GameManager.instance.sceneName))
+                return GameManager.instance.sceneName;
+
+            if (InstantActionConfigMenu.instance != null)
+            {
+                try
+                {
+                    var selectedMapField = typeof(InstantActionConfigMenu).GetField("selectedMap", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var selectedMap = selectedMapField?.GetValue(InstantActionConfigMenu.instance);
+                    var sceneNameField = selectedMap?.GetType().GetField("sceneName", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var sceneName = sceneNameField?.GetValue(selectedMap) as string;
+                    if (!string.IsNullOrEmpty(sceneName))
+                        return sceneName;
+                }
+                catch (Exception e)
+                {
+                    Plugin.logger.LogWarning($"Failed to read selected map for Discord presence: {e.Message}");
+                }
+            }
+
+            return "Unknown Map";
+        }
+
+        private string GetGameModeName()
+        {
+            var modeInfo = GameManager.instance?.gameModeParameters?.gameMode;
+            if (modeInfo == null)
+                modeInfo = InstantActionConfigMenu.instance?.selectedGameMode;
+
+            return !string.IsNullOrEmpty(modeInfo?.name) ? modeInfo.name : "Unknown Mode";
+        }
+
+        private (int current, int max) GetPlayerCounts()
+        {
+            if (LobbySystem.instance != null && LobbySystem.instance.InLobby && LobbySystem.instance.ActualLobbyID.IsValid())
+            {
+                int current = SteamMatchmaking.GetNumLobbyMembers(LobbySystem.instance.ActualLobbyID);
+                int max = SteamMatchmaking.GetLobbyMemberLimit(LobbySystem.instance.ActualLobbyID);
+                return (current, max);
+            }
+
+            return (1, 2);
+        }
+
+        private string GetScoreString()
+        {
+            var mode = GameModeBase.activeGameMode;
+            if (mode == null)
+                return string.Empty;
+
+            try
+            {
+                var type = mode.GetType();
+                var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+                var ticketsField = type.GetField("tickets", flags);
+                if (ticketsField != null && ticketsField.FieldType == typeof(int[]))
+                {
+                    var tickets = (int[])ticketsField.GetValue(mode);
+                    if (tickets != null && tickets.Length >= 2)
+                        return $" | {tickets[0]}-{tickets[1]}";
+                }
+
+                var blueScoreField = type.GetField("blueScore", flags);
+                var redScoreField = type.GetField("redScore", flags);
+                if (blueScoreField != null && redScoreField != null)
+                {
+                    int blue = (int)blueScoreField.GetValue(mode);
+                    int red = (int)redScoreField.GetValue(mode);
+                    return $" | {blue}-{red}";
+                }
+
+                var battalionsField = type.GetField("remainingBattalions", flags);
+                if (battalionsField != null && battalionsField.FieldType == typeof(int[]))
+                {
+                    var battalions = (int[])battalionsField.GetValue(mode);
+                    if (battalions != null && battalions.Length >= 2)
+                        return $" | {battalions[0]}-{battalions[1]}";
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.logger.LogWarning($"Failed to read team scores for Discord presence: {e.Message}");
+            }
+
+            return string.Empty;
+        }
+
+        private void OnDiscordActivityJoin(string secret)
+        {
+            if (string.IsNullOrEmpty(secret))
+                return;
+
+            secret = secret.Replace("_join", "");
+            Plugin.logger.LogInfo($"OnJoin {secret}");
+
+            if (!ulong.TryParse(secret, out ulong lobbyIdUlong))
+            {
+                Plugin.logger.LogWarning("Discord join secret was not a valid lobby ID.");
+                return;
+            }
+
+            var LobbyID = new CSteamID(lobbyIdUlong);
+
+            if (_isInGame)
+            {
+                GameManager.ReturnToMenu();
+            }
+
+            if (LobbySystem.instance != null)
+            {
+                SteamMatchmaking.JoinLobby(LobbyID);
+                LobbySystem.instance.InLobby = true;
+                LobbySystem.instance.IsLobbyOwner = false;
+                LobbySystem.instance.LobbyDataReady = false;
+            }
+        }
+
+        private void OnDiscordActivityJoinRequest(ref User user)
+        {
+            Plugin.logger.LogInfo($"OnJoinRequest {user.Username} {user.Id}");
+
+            if (_activityManager != null)
+            {
+                _activityManager.SendRequestReply(user.Id, ActivityJoinRequestReply.Yes, result =>
+                {
+                    if (result != Result.Ok)
+                        Plugin.logger.LogWarning($"Discord join request reply failed: {result}");
+                });
+            }
+        }
+
+        public void UpdateActivity(Discord discord, Activities activity, string state = "", string details = "", int currentPlayers = 1, int maxPlayers = 2, string lobbyID = "None")
         {
             var activityManager = discord.GetActivityManager();
             var activityPresence = new Activity();
-            
+
             switch (activity)
             {
                 case Activities.InitialActivity:
@@ -187,7 +335,7 @@ namespace RavenM
                 case Activities.InMenu:
                     activityPresence = new Activity()
                     {
-                        State = "Waiting In Menu",
+                        State = "In Main Menu",
                         Assets =
                         {
                             LargeImage = "rfimg_1_",
@@ -197,11 +345,10 @@ namespace RavenM
                     };
                     break;
                 case Activities.InLobby:
-                    var state = inGame ? "Playing Multiplayer" : "Waiting In Lobby";
                     activityPresence = new Activity()
                     {
-                        State = state,
-                        Details = $"Game Mode: {gameMode}",
+                        State = string.IsNullOrEmpty(state) ? "Waiting In Lobby" : state,
+                        Details = details,
                         Timestamps =
                         {
                             Start = startSessionTime,
@@ -211,9 +358,11 @@ namespace RavenM
                             LargeImage = "rfimg_1_",
                             LargeText = "RavenM",
                         },
-                        Party = {
+                        Party =
+                        {
                             Id = lobbyID,
-                            Size = {
+                            Size =
+                            {
                                 CurrentSize = currentPlayers,
                                 MaxSize = maxPlayers,
                             },
@@ -225,10 +374,11 @@ namespace RavenM
                         Instance = true,
                     };
                     break;
-                case Activities.InSinglePlayerGame:
+                case Activities.InMatch:
                     activityPresence = new Activity()
                     {
-                        State = "Playing Singleplayer",
+                        State = string.IsNullOrEmpty(state) ? "Playing" : state,
+                        Details = details,
                         Timestamps =
                         {
                             Start = startSessionTime,
@@ -238,12 +388,24 @@ namespace RavenM
                             LargeImage = "rfimg_1_",
                             LargeText = "RavenM",
                         },
+                        Party =
+                        {
+                            Id = lobbyID,
+                            Size =
+                            {
+                                CurrentSize = currentPlayers,
+                                MaxSize = maxPlayers,
+                            },
+                        },
+                        Secrets =
+                        {
+                            Join = lobbyID == "None" ? string.Empty : lobbyID + "_join",
+                        },
                         Instance = true,
                     };
                     break;
-                    
-               
             }
+
             activityManager.UpdateActivity(activityPresence, result =>
             {
                 if (result != Result.Ok)
@@ -256,7 +418,7 @@ namespace RavenM
             InitialActivity,
             InMenu,
             InLobby,
-            InSinglePlayerGame,
+            InMatch,
         }
     }
 }
