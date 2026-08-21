@@ -29,6 +29,15 @@
     <EmbeddedResource Include="assets\mic.png" />
     <EmbeddedResource Include="assets\kickanimcontroller" />
     <EmbeddedResource Include="assets\UIBundle" />
+    <EmbeddedResource Include="DiscordGameSDK\native\discord_game_sdk.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="DiscordGameSDK\native\discord_game_sdk.dll">
+      <Link>discord_game_sdk.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
