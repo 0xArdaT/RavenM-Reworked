@@ -898,6 +898,7 @@ namespace RavenM
             RSPatch.RSPatch.TargetGameObjectState.Clear();
 
             _matchEndBroadcasted = false;
+            _pendingRedirectAt = -1f;
         }
 
         public void ResetState()
@@ -933,6 +934,7 @@ namespace RavenM
             IsClient = true;
 
             _matchEndBroadcasted = false;
+            _pendingRedirectAt = -1f;
 
             foreach (var actor in FindObjectsOfType<Actor>())
             {
@@ -961,6 +963,7 @@ namespace RavenM
             IsClient = true;
 
             _matchEndBroadcasted = false;
+            _pendingRedirectAt = -1f;
 
             var player = ActorManager.instance.player;
             {
@@ -1126,19 +1129,18 @@ namespace RavenM
 
         private float _lastMatchEndTime = -1000f;
         private bool _matchEndBroadcasted = false;
+        private float _pendingRedirectAt = -1f;
+        private const float MatchEndRedirectDelay = 6f;
 
         /// <summary>
-        /// Send a MatchEnd notification (if host) and transition back to the map selection lobby.
+        /// Broadcast a MatchEnd notification (if host) and schedule the redirect back to the map
+        /// selection lobby after a short delay so the victory/defeat banner stays visible.
         /// </summary>
-        public void PerformMatchEndRedirect(bool broadcast, int winningTeam = -1)
+        public void ScheduleMatchEndRedirect(bool broadcast, int winningTeam = -1)
         {
-            if (broadcast && _matchEndBroadcasted)
-                return;
-
-            // Only the host can broadcast, and only when the match is actually over.
-            if (broadcast && IsHost)
+            if (broadcast && IsHost && !_matchEndBroadcasted)
             {
-                if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
+                if (GameManager.instance == null || !GameManager.instance.ingame)
                     return;
 
                 try
@@ -1166,6 +1168,18 @@ namespace RavenM
                 }
             }
 
+            if (IsClient && _pendingRedirectAt < 0f)
+            {
+                _pendingRedirectAt = Time.time + MatchEndRedirectDelay;
+                Plugin.logger.LogInfo($"Match end redirect scheduled in {MatchEndRedirectDelay}s.");
+            }
+        }
+
+        /// <summary>
+        /// Transition back to the map selection lobby immediately.
+        /// </summary>
+        public void PerformMatchEndRedirect()
+        {
             if (IsClient)
             {
                 try
@@ -1410,7 +1424,14 @@ namespace RavenM
                 if (IsHost && GameManager.instance != null && GameManager.instance.ingame && GameManager.gameOver && !_matchEndBroadcasted)
                 {
                     Plugin.logger.LogInfo("Match over state detected; ensuring MatchEnd broadcast.");
-                    PerformMatchEndRedirect(true, -1);
+                    ScheduleMatchEndRedirect(true, -1);
+                }
+
+                if (_pendingRedirectAt > 0f && Time.time >= _pendingRedirectAt)
+                {
+                    _pendingRedirectAt = -1f;
+                    Plugin.logger.LogInfo("Match end redirect delay elapsed; returning to map selection.");
+                    PerformMatchEndRedirect();
                 }
 
                 SteamNetworkingSockets.RunCallbacks();
@@ -2638,7 +2659,7 @@ namespace RavenM
                                     else
                                         Plugin.logger.LogInfo($"Match ended. Winning team: {matchEndPacket.WinningTeam}. Returning to lobby.");
 
-                                    PerformMatchEndRedirect(false, matchEndPacket.WinningTeam);
+                                    ScheduleMatchEndRedirect(false, matchEndPacket.WinningTeam);
                                 }
                                 break;
                             default:

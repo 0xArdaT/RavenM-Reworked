@@ -1,8 +1,4 @@
-using System.Diagnostics;
-using System.IO;
 using HarmonyLib;
-using Steamworks;
-using UnityEngine;
 
 namespace RavenM
 {
@@ -18,70 +14,42 @@ namespace RavenM
     }
 
     /// <summary>
-    /// Hook GameManager.OnGameEnded to broadcast a match-end RPC and redirect everyone back to the lobby.
-    /// Only act if the match has actually concluded (GameManager.gameOver is set).
+    /// Hook VictoryUi.EndGame — the single official entry point for the victory/defeat banner,
+    /// called only by game modes (BattleMode.Win, DominationMode.Win, PointMatch, etc.) when the
+    /// match has officially concluded. This fires even when GameManager.gameOver is never set
+    /// (e.g. neverending battles or spectating), which otherwise leaves everyone stuck in the map.
     /// </summary>
-    [HarmonyPatch(typeof(GameManager), "OnGameEnded")]
-    public class GameManagerOnGameEndedPatch
+    [HarmonyPatch(typeof(VictoryUi), "EndGame")]
+    public class VictoryUiEndGamePatch
     {
-        static void Postfix()
+        static void Postfix(int __0)
         {
             if (!IngameNetManager.instance.IsClient || !IngameNetManager.instance.IsHost)
                 return;
 
-            if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
+            if (GameManager.instance == null || !GameManager.instance.ingame)
                 return;
 
-            // If OnWin triggered first, let it handle the redirect.
-            if (IsInStack("OnWin"))
-                return;
-
-            IngameNetManager.instance.PerformMatchEndRedirect(true);
-        }
-
-        static bool IsInStack(string name)
-        {
-            var trace = new StackTrace();
-            foreach (var frame in trace.GetFrames())
-            {
-                if (frame.GetMethod().Name == name)
-                    return true;
-            }
-            return false;
+            Plugin.logger.LogInfo($"VictoryUi.EndGame fired (winner: {__0}); scheduling match end redirect.");
+            IngameNetManager.instance.ScheduleMatchEndRedirect(true, __0);
         }
     }
 
     /// <summary>
-    /// Hook GameManager.OnWin as a fallback match-end trigger.
-    /// Only act when GameManager has actually marked the match as over.
+    /// Hook GameManager.OnWin as a fallback match-end trigger for end paths that bypass VictoryUi.
     /// </summary>
     [HarmonyPatch(typeof(GameManager), "OnWin")]
     public class GameManagerOnWinPatch
     {
-        static void Postfix(int winner, bool continueNeverendingBattle)
+        static void Postfix(int winner)
         {
             if (!IngameNetManager.instance.IsClient || !IngameNetManager.instance.IsHost)
                 return;
 
-            if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
+            if (GameManager.instance == null || !GameManager.instance.ingame)
                 return;
 
-            // If this OnWin was called from OnGameEnded, OnGameEnded will handle the redirect.
-            if (IsInStack("OnGameEnded"))
-                return;
-
-            IngameNetManager.instance.PerformMatchEndRedirect(true, winner);
-        }
-
-        static bool IsInStack(string name)
-        {
-            var trace = new StackTrace();
-            foreach (var frame in trace.GetFrames())
-            {
-                if (frame.GetMethod().Name == name)
-                    return true;
-            }
-            return false;
+            IngameNetManager.instance.ScheduleMatchEndRedirect(true, winner);
         }
     }
 }
