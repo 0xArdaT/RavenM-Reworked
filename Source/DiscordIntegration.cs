@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using RavenM.DiscordGameSDK;
 using Steamworks;
@@ -301,7 +302,7 @@ namespace RavenM
                 {
                     partyId = LobbySystem.instance.ActualLobbyID.ToString();
                     _currentPartyId = partyId;
-                    _currentJoinSecret = partyId + "_join";
+                    _currentJoinSecret = partyId;
                 }
                 else if (_isInGame && !string.IsNullOrEmpty(_currentPartyId))
                 {
@@ -439,16 +440,24 @@ namespace RavenM
             if (string.IsNullOrEmpty(secret))
                 return;
 
-            secret = secret.Replace("_join", "");
-            Plugin.logger.LogInfo($"OnJoin {secret}");
+            secret = secret.Trim();
+            secret = new string(secret.Where(char.IsDigit).ToArray());
 
-            if (!ulong.TryParse(secret, out ulong lobbyIdUlong))
+            Plugin.logger.LogInfo($"OnJoin sanitized secret: {secret}");
+
+            if (string.IsNullOrEmpty(secret) || !ulong.TryParse(secret, out ulong lobbyIdUlong))
             {
                 Plugin.logger.LogWarning("Discord join secret was not a valid lobby ID.");
                 return;
             }
 
             var LobbyID = new CSteamID(lobbyIdUlong);
+
+            if (!LobbyID.IsValid())
+            {
+                Plugin.logger.LogWarning($"Discord join secret parsed to an invalid Steam lobby ID: {secret}");
+                return;
+            }
 
             if (LobbySystem.instance != null)
             {
@@ -536,7 +545,7 @@ namespace RavenM
                         },
                         Secrets =
                         {
-                            Join = hasParty ? lobbyID + "_join" : string.Empty,
+                            Join = hasParty ? lobbyID : string.Empty,
                         },
                         Instance = true,
                     };
