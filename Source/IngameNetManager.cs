@@ -28,6 +28,13 @@ namespace RavenM
             if (!IngameNetManager.instance.IsClient)
                 return;
 
+            // When the host auto-redirects after a match, keep the P2P lobby alive.
+            if (IngameNetManager.instance.IsAutoRedirecting)
+            {
+                IngameNetManager.instance.ResetGameState();
+                return;
+            }
+
             SteamNetworkingSockets.CloseConnection(IngameNetManager.instance.C2SConnection, 0, string.Empty, false);
 
             if (IngameNetManager.instance.IsHost)
@@ -516,6 +523,8 @@ namespace RavenM
 
         public bool IsClient = false;
 
+        public bool IsAutoRedirecting = false;
+
         public Texture2D MarkerTexture = new Texture2D(2, 2);
 
         public Texture2D RightMarker = new Texture2D(2, 2);
@@ -527,6 +536,8 @@ namespace RavenM
         public bool UsingMicrophone = false;
 
         public Texture2D MicTexture = new Texture2D(2, 2);
+
+        private Texture2D _connectionPanelBackground = new Texture2D(1, 1);
 
         public Dictionary<int, AudioContainer> PlayVoiceQueue = new Dictionary<int, AudioContainer>();
 
@@ -557,7 +568,7 @@ namespace RavenM
 
             MarkerTexture.LoadImage(imageBytes);
 
-            ChatManager.instance.GreyBackground.SetPixel(0, 0, Color.grey * 0.3f);
+            ChatManager.instance.GreyBackground.SetPixel(0, 0, new Color(0.08f, 0.10f, 0.14f, 0.82f));
             ChatManager.instance.GreyBackground.Apply();
 
             using var micResource = Assembly.GetExecutingAssembly().GetManifestResourceStream("RavenM.assets.mic.png");
@@ -580,6 +591,10 @@ namespace RavenM
             imageBytes = resourceMemory.ToArray();
 
             RightMarker.LoadImage(imageBytes);
+
+            _connectionPanelBackground.SetPixel(0, 0, new Color(0.06f, 0.08f, 0.12f, 0.78f));
+            _connectionPanelBackground.Apply();
+
             Steamworks_NativeMethods = Type.GetType("Steamworks.NativeMethods, com.rlabrecque.steamworks.net, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null");
             SteamAPI_SteamNetworkingMessage_t_Release = Steamworks_NativeMethods.GetMethod("SteamAPI_SteamNetworkingMessage_t_Release", BindingFlags.Static | BindingFlags.Public);
 
@@ -758,13 +773,28 @@ namespace RavenM
         {
             if (!IsClient || !OptionsPatch.showHUD)
                 return;
-            GUI.Label(new Rect(10, 30, 200, 40), $"Inbound: {_pps} PPS");
-            GUI.Label(new Rect(10, 50, 200, 40), $"Outbound: {_ppsOut} PPS -- {_bytesOut} Bytes");
+
+            float scale = Screen.width / 1920f;
+            float panelWidth = 260f * scale;
+            float panelHeight = 130f * scale;
+            GUI.DrawTexture(new Rect(10f * scale, 25f * scale, panelWidth, panelHeight), _connectionPanelBackground);
+
+            var labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                richText = true,
+                padding = new RectOffset(10, 10, 6, 6),
+            };
+            labelStyle.normal.textColor = new Color(0.85f, 0.90f, 0.95f);
 
             SteamNetConnectionRealTimeStatus_t pStats = new SteamNetConnectionRealTimeStatus_t();
             SteamNetConnectionRealTimeLaneStatus_t pLanes = new SteamNetConnectionRealTimeLaneStatus_t();
             SteamNetworkingSockets.GetConnectionRealTimeStatus(C2SConnection, ref pStats, 0, ref pLanes);
-            GUI.Label(new Rect(10, 80, 200, 40), $"Ping: {pStats.m_nPing} ms");
+
+            string pingColor = pStats.m_nPing < 80 ? "#4ECF7A" : pStats.m_nPing < 160 ? "#FFD166" : "#FF5F5F";
+
+            GUI.Label(new Rect(10f * scale, 25f * scale, panelWidth, 28f * scale), $"<b>Inbound:</b> {_pps} PPS", labelStyle);
+            GUI.Label(new Rect(10f * scale, 53f * scale, panelWidth, 28f * scale), $"<b>Outbound:</b> {_ppsOut} PPS  {_bytesOut}B", labelStyle);
+            GUI.Label(new Rect(10f * scale, 81f * scale, panelWidth, 28f * scale), $"<b>Ping:</b> <color={pingColor}>{pStats.m_nPing} ms</color>", labelStyle);
 
             if (_showSpecificOutbound)
             {
@@ -772,7 +802,7 @@ namespace RavenM
                 int i = 0;
                 foreach (var kv in ordered)
                 {
-                    GUI.Label(new Rect(10, 110 + i * 30, 200, 40), $"{kv.Key} - {kv.Value}B");
+                    GUI.Label(new Rect(10f * scale, (110f + i * 28f) * scale, panelWidth, 28f * scale), $"{kv.Key} - {kv.Value}B", labelStyle);
                     i++;
                 }
             }
@@ -815,7 +845,10 @@ namespace RavenM
                 GUI.DrawTexture(new Rect(315f, Screen.height - 60f, 50f, 50f), MicTexture);
         }
 
-        public void ResetState()
+        /// <summary>
+        /// Reset everything related to the current match without tearing down the network session.
+        /// </summary>
+        public void ResetGameState()
         {
             _ticker2 = 0f;
             _pps = 0;
@@ -843,10 +876,6 @@ namespace RavenM
 
             ClientCanSpawnBot = false;
 
-            IsHost = false;
-
-            IsClient = false;
-
             MarkerPosition = Vector3.zero;
 
             ChatManager.instance.CurrentChatMessage = string.Empty;
@@ -863,6 +892,15 @@ namespace RavenM
             RSPatch.RSPatch.OwnedObjects.Clear();
             RSPatch.RSPatch.ClientObjects.Clear();
             RSPatch.RSPatch.TargetGameObjectState.Clear();
+        }
+
+        public void ResetState()
+        {
+            ResetGameState();
+
+            IsHost = false;
+
+            IsClient = false;
         }
 
         public void OpenRelay()
@@ -1020,6 +1058,95 @@ namespace RavenM
                     if (res != EResult.k_EResultOK)
                         Plugin.logger.LogError($"Packet failed to send: {res}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// Broadcast a packet directly to every connected client. Used when the host needs to push
+        /// a message without waiting for the next FixedUpdate relay cycle (e.g. match end).
+        /// </summary>
+        public void BroadcastPacketToClients(byte[] data, PacketType type, int send_flags)
+        {
+            if (!IsHost)
+                return;
+
+            using MemoryStream compressOut = new MemoryStream();
+            using (DeflateStream deflateStream = new DeflateStream(compressOut, System.IO.Compression.CompressionLevel.Optimal))
+            {
+                deflateStream.Write(data, 0, data.Length);
+            }
+            byte[] compressed = compressOut.ToArray();
+
+            using MemoryStream packetStream = new MemoryStream();
+            Packet packet = new Packet
+            {
+                Id = type,
+                sender = OwnGUID,
+                data = compressed
+            };
+
+            using (var writer = new ProtocolWriter(packetStream))
+            {
+                writer.Write(packet);
+            }
+            byte[] packet_data = packetStream.ToArray();
+
+            _totalBytesOut += packet_data.Length;
+
+            if (_specificBytesOut.ContainsKey(type))
+                _specificBytesOut[type] += packet_data.Length;
+            else
+                _specificBytesOut[type] = packet_data.Length;
+
+            unsafe
+            {
+                fixed (byte* p_msg = packet_data)
+                {
+                    for (int i = ServerConnections.Count - 1; i >= 0; i--)
+                    {
+                        var connection = ServerConnections[i];
+                        var res = SteamNetworkingSockets.SendMessageToConnection(connection, (IntPtr)p_msg, (uint)packet_data.Length, send_flags, out long num);
+                        if (res != EResult.k_EResultOK)
+                            Plugin.logger.LogError($"Broadcast packet failed to send: {res}");
+                    }
+                }
+            }
+        }
+
+        private float _lastMatchEndTime = -1000f;
+
+        /// <summary>
+        /// Send a MatchEnd notification (if host) and transition back to the map selection lobby.
+        /// </summary>
+        public void PerformMatchEndRedirect(bool broadcast, int winningTeam = -1)
+        {
+            if (Time.time - _lastMatchEndTime < 5f)
+                return;
+
+            _lastMatchEndTime = Time.time;
+
+            if (broadcast && IsHost)
+            {
+                using MemoryStream memoryStream = new MemoryStream();
+                var matchEndPacket = new MatchEndPacket
+                {
+                    WinningTeam = winningTeam,
+                };
+
+                using (var writer = new ProtocolWriter(memoryStream))
+                {
+                    writer.Write(matchEndPacket);
+                }
+
+                byte[] data = memoryStream.ToArray();
+                BroadcastPacketToClients(data, PacketType.MatchEnd, Constants.k_nSteamNetworkingSend_Reliable);
+            }
+
+            if (IsClient)
+            {
+                IsAutoRedirecting = true;
+                GameManager.ReturnToMenu();
+                IsAutoRedirecting = false;
             }
         }
 
@@ -2347,6 +2474,18 @@ namespace RavenM
                                     {
                                         Plugin.logger.LogWarning($"Something went wrong with trigger packets somewhere: {e}");
                                     }
+                                }
+                                break;
+                            case PacketType.MatchEnd:
+                                {
+                                    var matchEndPacket = dataStream.ReadMatchEndPacket();
+
+                                    if (matchEndPacket.WinningTeam == -1)
+                                        Plugin.logger.LogInfo("Match ended. Returning to lobby.");
+                                    else
+                                        Plugin.logger.LogInfo($"Match ended. Winning team: {matchEndPacket.WinningTeam}. Returning to lobby.");
+
+                                    PerformMatchEndRedirect(false, matchEndPacket.WinningTeam);
                                 }
                                 break;
                             default:

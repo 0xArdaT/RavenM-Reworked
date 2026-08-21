@@ -1,0 +1,12 @@
+# Build output
+Source/bin/
+Source/obj/
+
+# Visual Studio / Rider
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# NuGet
+*.nupkg

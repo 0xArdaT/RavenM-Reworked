@@ -327,6 +327,11 @@ namespace RavenM
             Write(value.Id);
         }
 
+        public void Write(MatchEndPacket value)
+        {
+            Write(value.WinningTeam);
+        }
+
         public void Write(DominationStatePacket value)
         {
             Write(value.RemainingBattalions);
@@ -916,6 +921,14 @@ namespace RavenM
             return new ExplodeProjectilePacket
             {
                 Id = ReadInt32(),
+            };
+        }
+
+        public MatchEndPacket ReadMatchEndPacket()
+        {
+            return new MatchEndPacket
+            {
+                WinningTeam = ReadInt32(),
             };
         }
 

@@ -417,10 +417,11 @@ namespace RavenM
         {
             instance = this;
 
-            LobbyBackground.SetPixel(0, 0, Color.black);
+            // Modern dark translucent panel background.
+            LobbyBackground.SetPixel(0, 0, new Color(0.06f, 0.08f, 0.12f, 0.85f));
             LobbyBackground.Apply();
 
-            ProgressTexture.SetPixel(0, 0, Color.green);
+            ProgressTexture.SetPixel(0, 0, new Color(0.31f, 0.80f, 0.77f));
             ProgressTexture.Apply();
         }
 
@@ -1108,17 +1109,26 @@ namespace RavenM
             if (menu_page != MainMenu.PAGE_INSTANT_ACTION)
                 return;
 
-            var lobbyStyle = new GUIStyle(GUI.skin.box);
-            lobbyStyle.normal.background = LobbyBackground;
+            float scale = Screen.width / 1920f;
+
+            var lobbyStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = LobbyBackground, textColor = new Color(0.9f, 0.94f, 0.96f) },
+                padding = new RectOffset(14, 14, 12, 12),
+                margin = new RectOffset(6, 6, 6, 6),
+            };
+
+            GUI.skin.label.richText = true;
+            GUI.skin.button.richText = true;
 
             if (GameManager.IsInMainMenu() && NotificationText != string.Empty)
             {
-                GUILayout.BeginArea(new Rect((Screen.width - 250f) / 2f, (Screen.height - 200f) / 2f, 250f, 200f), string.Empty);
+                GUILayout.BeginArea(new Rect((Screen.width - 300f * scale) / 2f, (Screen.height - 220f * scale) / 2f, 300f * scale, 220f * scale), string.Empty);
                 GUILayout.BeginVertical(lobbyStyle);
 
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                GUILayout.Label("<color=red>RavenM Message:</color>");
+                GUILayout.Label("<color=#4ECDC4><b>RavenM</b> Message:</color>");
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
@@ -1145,12 +1155,12 @@ namespace RavenM
 
             if (GameManager.IsInMainMenu() && IntentionToStart)
             {
-                GUILayout.BeginArea(new Rect((Screen.width - 250f) / 2f, (Screen.height - 200f) / 2f, 250f, 200f), string.Empty);
+                GUILayout.BeginArea(new Rect((Screen.width - 300f * scale) / 2f, (Screen.height - 220f * scale) / 2f, 300f * scale, 220f * scale), string.Empty);
                 GUILayout.BeginVertical(lobbyStyle);
 
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                GUILayout.Label("<color=red>RavenM WARNING:</color>");
+                GUILayout.Label("<color=#FFD166><b>RavenM</b> WARNING:</color>");
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
@@ -1166,7 +1176,7 @@ namespace RavenM
 
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("<color=green>CONTINUE</color>")) {
+                if (GUILayout.Button("<color=#4ECF7A>CONTINUE</color>")) {
                     HasCommittedToStart = true;
                     IntentionToStart = false;
                     InstantActionConfigMenu.instance.StartGame();
@@ -1183,14 +1193,14 @@ namespace RavenM
 
             if (!InLobby && GUIStack.Count != 0 && GameManager.IsInMainMenu())
             {
-                GUILayout.BeginArea(new Rect(10f, 10f, 150f, 10000f), string.Empty);
+                GUILayout.BeginArea(new Rect(10f * scale, 10f * scale, 200f * scale, 10000f), string.Empty);
                 GUILayout.BeginVertical(lobbyStyle);
 
                 if (GUIStack.Peek() == "Main")
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    GUILayout.Label($"RavenM");
+                    GUILayout.Label("<color=#4ECDC4><b>RavenM</b></color>");
                     GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
 
@@ -1208,7 +1218,7 @@ namespace RavenM
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    GUILayout.Label($"HOST");
+                    GUILayout.Label("<color=#4ECDC4><b>HOST</b></color>");
                     GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
 
@@ -1269,14 +1279,14 @@ namespace RavenM
 
                     GUILayout.Space(3f);
 
-                    if (GUILayout.Button("<color=#888888>BACK</color>"))
+                    if (GUILayout.Button("<color=#A0A0A0>BACK</color>"))
                         GUIStack.Pop();
                 }
                 else if (GUIStack.Peek() == "Join")
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    GUILayout.Label($"JOIN");
+                    GUILayout.Label("<color=#4ECDC4><b>JOIN</b></color>");
                     GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
 
@@ -1296,14 +1306,14 @@ namespace RavenM
 
                     GUILayout.Space(3f);
 
-                    if (GUILayout.Button("<color=#888888>BACK</color>"))
+                    if (GUILayout.Button("<color=#A0A0A0>BACK</color>"))
                         GUIStack.Pop();
                 }
                 else if (GUIStack.Peek() == "Direct")
                 {
                     GUILayout.BeginHorizontal();
                         GUILayout.FlexibleSpace();
-                            GUILayout.Label($"DIRECT CONNECT");
+                            GUILayout.Label("<color=#4ECDC4><b>DIRECT CONNECT</b></color>");
                         GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
 
@@ -1333,14 +1343,14 @@ namespace RavenM
 
                     GUILayout.Space(3f);
 
-                    if (GUILayout.Button("<color=#888888>BACK</color>"))
+                    if (GUILayout.Button("<color=#A0A0A0>BACK</color>"))
                         GUIStack.Pop();
                 }
                 else if (GUIStack.Peek() == "Browse")
                 {
                     GUILayout.BeginHorizontal();
                         GUILayout.FlexibleSpace();
-                            GUILayout.Label($"BROWSE");
+                            GUILayout.Label("<color=#4ECDC4><b>BROWSE</b></color>");
                         GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
 
@@ -1365,7 +1375,7 @@ namespace RavenM
                         var owner = SteamMatchmaking.GetLobbyData(lobby, "owner");
 
                         bool hasData = false;
-                        string name = "<color=#777777>Loading...</color>";
+                        string name = "<color=#A0A0A0>Loading...</color>";
                         if (owner != string.Empty)
                         {
                             var ownerId = new CSteamID(ulong.Parse(owner));
@@ -1390,7 +1400,7 @@ namespace RavenM
 
                     GUILayout.Space(3f);
 
-                    if (GUILayout.Button("<color=#888888>BACK</color>"))
+                    if (GUILayout.Button("<color=#A0A0A0>BACK</color>"))
                         GUIStack.Pop();
                 }
                 else if (GUIStack.Peek() == "Lobby View")
@@ -1431,14 +1441,14 @@ namespace RavenM
                     map = map != string.Empty ? map : "Default";
                     GUILayout.Label($"MAP: {map}");
 
-                    var status = SteamMatchmaking.GetLobbyData(LobbyView, "started") == "yes" ? "<color=green>In-game</color>" : "Configuring";
+                    var status = SteamMatchmaking.GetLobbyData(LobbyView, "started") == "yes" ? "<color=#4ECF7A>In-game</color>" : "Configuring";
                     GUILayout.Label($"STATUS: {status}");
 
                     GUILayout.Space(10f);
 
                     if (Plugin.BuildGUID != SteamMatchmaking.GetLobbyData(LobbyView, "build_id"))
                     {
-                        GUILayout.Label("<color=red>This lobby is running on a different version of RavenM!</color>");
+                        GUILayout.Label("<color=#FF5F5F>This lobby is running on a different version of RavenM!</color>");
                     }
                     else if (GUILayout.Button("JOIN"))
                     {
@@ -1450,7 +1460,7 @@ namespace RavenM
 
                     GUILayout.Space(3f);
 
-                    if (GUILayout.Button("<color=#888888>BACK</color>"))
+                    if (GUILayout.Button("<color=#A0A0A0>BACK</color>"))
                         GUIStack.Pop();
                 }
 
@@ -1472,13 +1482,13 @@ namespace RavenM
                     }
                 }
 
-                GUILayout.BeginArea(new Rect(10f, 10f, 150f, 10000f), string.Empty);
+                GUILayout.BeginArea(new Rect(10f * scale, 10f * scale, 200f * scale, 10000f), string.Empty);
                 GUILayout.BeginVertical(lobbyStyle);
 
                 var members = GetLobbyMembers();
                 int len = members.Count;
 
-                if (GameManager.IsInMainMenu() && GUILayout.Button("<color=red>LEAVE</color>"))
+                if (GameManager.IsInMainMenu() && GUILayout.Button("<color=#FF5F5F>LEAVE</color>"))
                 {
                     SteamMatchmaking.LeaveLobby(ActualLobbyID);
                     LobbyDataReady = false;
@@ -1526,7 +1536,7 @@ namespace RavenM
 
                     var readyColor = (GameManager.IsInMainMenu() ? SteamMatchmaking.GetLobbyMemberData(ActualLobbyID, memberId, "loaded") == "yes" 
                                                                     : SteamMatchmaking.GetLobbyMemberData(ActualLobbyID, memberId, "ready") == "yes") 
-                                                                    ? "green" : "red";
+                                                                    ? "#4ECF7A" : "#FF5F5F";
 
                     if (memberId != KickPrompt)
                     {
@@ -1579,7 +1589,7 @@ namespace RavenM
 
             if (ModsToDownload.Count > 0)
             {
-                GUILayout.BeginArea(new Rect(160f, 10f, 150f, 10000f), string.Empty);
+                GUILayout.BeginArea(new Rect((170f + 200f * scale) * scale, 10f * scale, 200f * scale, 10000f), string.Empty);
                 GUILayout.BeginVertical(lobbyStyle);
 
                 int hasDownloaded = ServerMods.Count - ModsToDownload.Count;
@@ -1629,7 +1639,7 @@ namespace RavenM
 
                 GUILayout.Space(15f);
 
-                if (GUILayout.Button("<color=red>CANCEL</color>"))
+                if (GUILayout.Button("<color=#FF5F5F>CANCEL</color>"))
                 {
                     if (InLobby)
                     {

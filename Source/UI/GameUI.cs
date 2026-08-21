@@ -202,7 +202,7 @@ namespace RavenM.UI
             Color color = ColorScheme.TeamColor(team);
             if (team == playerTeamID)
             {
-                color = Color.green;
+                color = new Color(0.31f, 0.81f, 0.48f);
                 if (customColor)
                     color = customColorTeam;
             }
