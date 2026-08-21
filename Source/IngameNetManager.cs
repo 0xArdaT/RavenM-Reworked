@@ -1125,8 +1125,12 @@ namespace RavenM
 
             _lastMatchEndTime = Time.time;
 
+            // Only the host can broadcast, and only when the match is actually over.
             if (broadcast && IsHost)
             {
+                if (GameManager.instance == null || !GameManager.instance.ingame || !GameManager.gameOver)
+                    return;
+
                 using MemoryStream memoryStream = new MemoryStream();
                 var matchEndPacket = new MatchEndPacket
                 {
