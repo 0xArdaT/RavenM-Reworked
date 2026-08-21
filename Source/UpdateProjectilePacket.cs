@@ -13,7 +13,13 @@ namespace RavenM
             if (!IngameNetManager.instance.IsClient)
                 return true;
 
-            var guid = __instance.GetComponent<GuidComponent>();
+            var missile = __instance;
+
+            // Guard against destroyed/missing missiles to prevent MissingReferenceException spam.
+            if (missile == null || missile.gameObject == null)
+                return false;
+
+            var guid = missile.GetComponent<GuidComponent>();
 
             if (guid == null)
                 return true;
@@ -23,7 +29,7 @@ namespace RavenM
             if (IngameNetManager.instance.OwnedProjectiles.Contains(id))
                 return true;
 
-            typeof(ExplodingProjectile).GetMethod("Travel", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(__instance, new object[] { __instance.velocity * Time.deltaTime });
+            typeof(ExplodingProjectile).GetMethod("Travel", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(missile, new object[] { missile.velocity * Time.deltaTime });
             return false;
         }
     }
@@ -47,6 +53,9 @@ namespace RavenM
         static void Prefix(Projectile __instance)
         {
             if (!IngameNetManager.instance.IsClient)
+                return;
+
+            if (__instance == null || __instance.gameObject == null)
                 return;
 
             var guid = __instance.GetComponent<GuidComponent>();

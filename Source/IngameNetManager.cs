@@ -655,8 +655,12 @@ namespace RavenM
 
                 var vehicle = ClientVehicles[id];
 
-                if (vehicle == null)
+                if (vehicle == null || vehicle.gameObject == null)
+                {
+                    ClientVehicles.Remove(id);
+                    TargetVehicleStates.Remove(id);
                     continue;
+                }
 
                 vehicle.transform.position = Vector3.Lerp(vehicle.transform.position, vehiclePacket.Position, 5f * Time.deltaTime);
 
@@ -1310,8 +1314,6 @@ namespace RavenM
                                                         return;
                                                     }
 
-                                                    Plugin.logger.LogInfo($"Requesting audio of size: {data.Length}");
-
                                                     int count = 0;
                                                     while (count < data.Length)
                                                     {
@@ -1443,12 +1445,8 @@ namespace RavenM
                                             ClientDestructibles[vehiclePacket.Id] = vehicle.gameObject;
                                         }
 
-                                        if (vehicle == null)
+                                        if (vehicle == null || vehicle.gameObject == null)
                                         {
-                                            if (vehiclePacket.Dead)
-                                                continue;
-
-                                            Plugin.logger.LogError($"Vehicle with id {vehiclePacket.Id} has somehow dissapeared. Skipping this update for now.");
                                             ClientVehicles.Remove(vehiclePacket.Id);
                                             continue;
                                         }
@@ -1964,6 +1962,12 @@ namespace RavenM
                                     var prefab = PrefabCache[tag];
                                     var projectile = ProjectilePoolManager.InstantiateProjectile(prefab, spawnPacket.Position, spawnPacket.Rotation);
 
+                                    if (projectile == null || projectile.gameObject == null)
+                                    {
+                                        Plugin.logger.LogDebug($"Failed to instantiate projectile prefab with hash {spawnPacket.NameHash}.");
+                                        continue;
+                                    }
+
                                     projectile.killCredit = actor;
                                     projectile.sourceWeapon = null;
                                     projectile.performInfantryInitialMuzzleTravel = spawnPacket.performInfantryInitialMuzzleTravel;
@@ -2012,8 +2016,11 @@ namespace RavenM
 
                                         Projectile projectile = ClientProjectiles[projectilePacket.Id];
 
-                                        if (projectile == null)
+                                        if (projectile == null || projectile.gameObject == null)
+                                        {
+                                            ClientProjectiles.Remove(projectilePacket.Id);
                                             continue;
+                                        }
 
                                         projectile.transform.position = projectilePacket.Position;
                                         projectile.velocity = projectilePacket.Velocity;
@@ -2033,8 +2040,11 @@ namespace RavenM
 
                                     Projectile projectile = ClientProjectiles[explodePacket.Id];
 
-                                    if (projectile == null)
+                                    if (projectile == null || projectile.gameObject == null)
+                                    {
+                                        ClientProjectiles.Remove(explodePacket.Id);
                                         continue;
+                                    }
 
                                     // RemoteDetonatedProjectiles don't explode like normal projectiles.
                                     if (projectile.GetType() == typeof(RemoteDetonatedProjectile))
@@ -2780,18 +2790,30 @@ namespace RavenM
                 Updates = new List<VehiclePacket>(),
             };
 
+            var vehicleCleanup = new List<int>();
+
             foreach (var owned_vehicle in OwnedVehicles)
             {
+                if (!ClientVehicles.ContainsKey(owned_vehicle))
+                {
+                    vehicleCleanup.Add(owned_vehicle);
+                    continue;
+                }
+
                 Vehicle vehicle = ClientVehicles[owned_vehicle];
 
-                if (vehicle == null)
+                if (vehicle == null || vehicle.gameObject == null)
+                {
+                    ClientVehicles.Remove(owned_vehicle);
+                    vehicleCleanup.Add(owned_vehicle);
                     continue;
+                }
 
                 var tag = vehicle.gameObject.GetComponent<PrefabTag>();
 
                 if (tag == null)
                 {
-                    Plugin.logger.LogError($"Vehicle {vehicle.name} is somehow untagged!");
+                    Plugin.logger.LogDebug($"Vehicle {vehicle.name} is somehow untagged!");
                     continue;
                 }
 
@@ -2810,6 +2832,9 @@ namespace RavenM
 
                 bulkVehicleUpdate.Updates.Add(net_vehicle);
             }
+
+            foreach (var id in vehicleCleanup)
+                OwnedVehicles.Remove(id);
 
             if (bulkVehicleUpdate.Updates.Count == 0)
                 return;
@@ -2836,10 +2861,17 @@ namespace RavenM
 
             foreach (var owned_projectile in OwnedProjectiles)
             {
+                if (!ClientProjectiles.ContainsKey(owned_projectile))
+                {
+                    cleanup.Add(owned_projectile);
+                    continue;
+                }
+
                 var projectile = ClientProjectiles[owned_projectile];
 
-                if (projectile == null)
+                if (projectile == null || projectile.gameObject == null)
                 {
+                    ClientProjectiles.Remove(owned_projectile);
                     cleanup.Add(owned_projectile);
                     continue;
                 }
