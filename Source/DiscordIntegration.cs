@@ -21,6 +21,19 @@ namespace RavenM
 
         private ActivityManager _activityManager;
 
+        private enum DiscordState
+        {
+            Disconnected,
+            Connected,
+        }
+
+        private DiscordState _state = DiscordState.Disconnected;
+
+        private TimedAction _reconnectTimer = new TimedAction(5f);
+        private TimedAction _presenceTimer = new TimedAction(5f);
+        private bool _needsPresenceUpdate = true;
+        private string _pendingDisconnectReason;
+        private string _lastDiscordStatus;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         static extern IntPtr LoadLibrary(string lpPathName);
@@ -82,12 +95,20 @@ namespace RavenM
 
         private void Start()
         {
-            if (Environment.OSVersion.Platform == PlatformID.Win32NT && !Environment.Is64BitProcess)
+            _reconnectTimer.Start();
+            _presenceTimer.Start();
+            TryInitialize();
+        }
+
+        private void TryInitialize()
+        {
+            if (Discord != null)
+                return;
+
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT && Environment.Is64BitProcess)
             {
-                LoadLibrary("BepInEx/plugins/lib/x86/discord_game_sdk");
+                EnsureDiscordLibrary();
             }
-            // Non BepInEx Plugin dlls have no effect in systems that are not windows
-            // copying them to ravenfield_Data/Plugins seems to fix it
             else if (Environment.OSVersion.Platform == PlatformID.Unix)
             {
                 if (Directory.Exists("ravenfield_Data")) // Assume its the linux installation
@@ -116,68 +137,109 @@ namespace RavenM
                 }
             }
 
-            if (Environment.OSVersion.Platform == PlatformID.Win32NT && Environment.Is64BitProcess)
-            {
-                EnsureDiscordLibrary();
-            }
-
             try
             {
                 Discord = new Discord(discordClientID, (UInt64)CreateFlags.NoRequireDiscord);
+                _activityManager = Discord.GetActivityManager();
+
+                _activityManager.OnActivityJoin += OnDiscordActivityJoin;
+                _activityManager.OnActivityJoinRequest += OnDiscordActivityJoinRequest;
+                _activityManager.OnActivitySpectate += secret =>
+                {
+                    Plugin.logger.LogInfo($"OnActivitySpectate {secret}");
+                };
+
+                startSessionTime = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds();
+                _state = DiscordState.Connected;
+                _needsPresenceUpdate = true;
+                _pendingDisconnectReason = null;
+
+                LogDiscordStatus("Discord RPC connected.");
+                UpdatePresence();
             }
             catch (Exception e)
             {
-                Plugin.logger.LogWarning($"Discord RPC failed to initialize (Discord may not be running): {e.Message}");
-                return;
+                string resultMsg = "";
+                if (e is ResultException re)
+                    resultMsg = $" ({re.Result})";
+
+                LogDiscordStatus($"Discord RPC not available{resultMsg}: {e.Message}");
+                DisposeDiscord();
             }
-
-            Plugin.logger.LogInfo("Discord Instance created");
-            startSessionTime = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds();
-
-            _activityManager = Discord.GetActivityManager();
-
-            _activityManager.OnActivityJoin += OnDiscordActivityJoin;
-            _activityManager.OnActivityJoinRequest += OnDiscordActivityJoinRequest;
-            _activityManager.OnActivitySpectate += secret =>
+            finally
             {
-                Plugin.logger.LogInfo($"OnActivitySpectate {secret}");
-            };
-
-            StartCoroutine(StartActivities());
+                _reconnectTimer.Start();
+            }
         }
 
-        private void OnApplicationQuit()
+        private void Disconnect(string reason)
         {
+            if (_state == DiscordState.Connected)
+                LogDiscordStatus($"Discord RPC disconnected: {reason}");
+
+            _state = DiscordState.Disconnected;
+            _pendingDisconnectReason = null;
+            DisposeDiscord();
+            _reconnectTimer.Start();
+        }
+
+        private void DisposeDiscord()
+        {
+            if (_activityManager != null)
+            {
+                try
+                {
+                    _activityManager.ClearActivity(result => { });
+                }
+                catch
+                {
+                    // ignored
+                }
+                _activityManager = null;
+            }
+
             if (Discord != null)
             {
                 try
                 {
-                    _activityManager?.ClearActivity(result => { });
                     Discord.Dispose();
-                    Discord = null;
                 }
-                catch (Exception e)
+                catch
                 {
-                    Plugin.logger.LogWarning($"Discord RPC shutdown failed: {e.Message}");
+                    // ignored
                 }
+                Discord = null;
             }
         }
 
-        IEnumerator StartActivities()
+        private void LogDiscordStatus(string message)
         {
-            UpdateActivity(Discord, Activities.InitialActivity);
-            yield return new WaitUntil(GameManager.IsInMainMenu);
-            UpdateActivity(Discord, Activities.InMenu);
+            if (message == _lastDiscordStatus)
+                return;
+
+            _lastDiscordStatus = message;
+
+            if (message.StartsWith("Discord RPC connected"))
+                Plugin.logger.LogInfo(message);
+            else
+                Plugin.logger.LogWarning(message);
         }
 
-        private TimedAction _timer = new TimedAction(5f);
-
-        private string _gameMode = "Insert Game Mode";
+        private void OnApplicationQuit()
+        {
+            DisposeDiscord();
+        }
 
         private void FixedUpdate()
         {
             if (Discord == null)
+            {
+                if (_reconnectTimer.TrueDone())
+                {
+                    TryInitialize();
+                }
                 return;
+            }
 
             try
             {
@@ -185,14 +247,36 @@ namespace RavenM
             }
             catch (Exception e)
             {
-                Plugin.logger.LogWarning($"Discord RPC callback error: {e.Message}");
+                string resultMsg = "";
+                if (e is ResultException re)
+                    resultMsg = $" ({re.Result})";
+
+                Disconnect($"RunCallbacks error{resultMsg}: {e.Message}");
+                return;
             }
 
-            if (_timer.TrueDone())
+            if (!string.IsNullOrEmpty(_pendingDisconnectReason))
             {
-                ChangeActivityDynamically();
-                _timer.Start();
+                var reason = _pendingDisconnectReason;
+                _pendingDisconnectReason = null;
+                Disconnect(reason);
+                return;
             }
+
+            if (_presenceTimer.TrueDone() || _needsPresenceUpdate)
+            {
+                _needsPresenceUpdate = false;
+                UpdatePresence();
+                _presenceTimer.Start();
+            }
+        }
+
+        private void UpdatePresence()
+        {
+            if (Discord == null || GameManager.instance == null)
+                return;
+
+            ChangeActivityDynamically();
         }
 
         private bool _isInGame;
@@ -230,6 +314,8 @@ namespace RavenM
                 UpdateActivity(Discord, Activities.InMenu);
             }
         }
+
+        private string _gameMode = "Insert Game Mode";
 
         private string GetMapName()
         {
@@ -375,18 +461,6 @@ namespace RavenM
 
             switch (activity)
             {
-                case Activities.InitialActivity:
-                    activityPresence = new Activity()
-                    {
-                        State = "Just Started Playing",
-                        Assets =
-                        {
-                            LargeImage = "rfimg_1_",
-                            LargeText = "RavenM",
-                        },
-                        Instance = true,
-                    };
-                    break;
                 case Activities.InMenu:
                     activityPresence = new Activity()
                     {
@@ -463,14 +537,19 @@ namespace RavenM
 
             activityManager.UpdateActivity(activityPresence, result =>
             {
+                if (result == Result.NotRunning)
+                {
+                    _pendingDisconnectReason = $"UpdateActivity failed: {result}";
+                    return;
+                }
+
                 if (result != Result.Ok)
-                    Plugin.logger.LogWarning($"Update Discord Activity Err {result}");
+                    LogDiscordStatus($"Update Discord Activity failed: {result}");
             });
         }
 
         public enum Activities
         {
-            InitialActivity,
             InMenu,
             InLobby,
             InMatch,
