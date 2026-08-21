@@ -30,6 +30,56 @@ namespace RavenM
             instance = this;
         }
 
+        private void EnsureDiscordLibrary()
+        {
+            string pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string dllPath = Path.Combine(pluginDir, "discord_game_sdk.dll");
+
+            if (!File.Exists(dllPath))
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                string resourceName = null;
+
+                foreach (var name in assembly.GetManifestResourceNames())
+                {
+                    if (name.EndsWith("discord_game_sdk.dll", StringComparison.OrdinalIgnoreCase))
+                    {
+                        resourceName = name;
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(resourceName))
+                {
+                    Plugin.logger.LogError("Embedded discord_game_sdk.dll resource not found. Discord RPC will not work without the native library.");
+                    return;
+                }
+
+                try
+                {
+                    using (Stream s = assembly.GetManifestResourceStream(resourceName))
+                    using (FileStream fs = new FileStream(dllPath, FileMode.Create, FileAccess.Write))
+                    {
+                        s.CopyTo(fs);
+                    }
+
+                    Plugin.logger.LogInfo("Extracted discord_game_sdk.dll alongside RavenM.dll.");
+                }
+                catch (Exception e)
+                {
+                    Plugin.logger.LogWarning($"Failed to extract discord_game_sdk.dll: {e.Message}");
+                    return;
+                }
+            }
+
+            IntPtr hMod = LoadLibrary(dllPath);
+            if (hMod == IntPtr.Zero)
+            {
+                int err = Marshal.GetLastWin32Error();
+                Plugin.logger.LogWarning($"LoadLibrary discord_game_sdk.dll failed (error {err}). Discord may not function.");
+            }
+        }
+
         private void Start()
         {
             if (Environment.OSVersion.Platform == PlatformID.Win32NT && !Environment.Is64BitProcess)
@@ -64,6 +114,11 @@ namespace RavenM
                         File.Copy("BepInEx/plugins/lib/discord_game_sdk.bundle", "ravenfield.app/Contents/Plugins/discord_game_sdk.bundle");
                     }
                 }
+            }
+
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT && Environment.Is64BitProcess)
+            {
+                EnsureDiscordLibrary();
             }
 
             try
