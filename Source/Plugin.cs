@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -95,7 +95,7 @@ namespace RavenM
             {
                 if (!changeGUID)
                 {
-                    return "RavenM-Reworked-v1.4-EA38";
+                    return "RavenM-Reworked-v1.4.1-EA38";
                 }
                 else
                 {
