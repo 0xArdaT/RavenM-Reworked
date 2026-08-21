@@ -95,7 +95,7 @@ namespace RavenM
             {
                 if (!changeGUID)
                 {
-                    return "RavenM-Reworked-v1.3.2-EA38";
+                    return "RavenM-Reworked-v1.4-EA38";
                 }
                 else
                 {
